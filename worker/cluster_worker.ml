@@ -184,6 +184,35 @@ let check_docker_partition t =
     if free < prune_threshold then Error `Disk_space_low
     else Ok ()
 
+let read_pressure_avg10 p = fun () ->
+  let ic = open_in ("/proc/pressure/" ^ p) in
+  let try_read () =
+    try Some (input_line ic)
+    with End_of_file -> None
+  in let do_split s =
+    let sp = Str.split (Str.regexp {|[= ]+|}) s in
+      (List.hd sp, float_of_string(List.nth sp 2))
+  in let rec loop acc =
+    match try_read () with
+    | Some s -> loop ((do_split s) :: acc)
+    | None -> close_in ic ; List.rev acc
+  in loop []
+
+let pressure_some p = fun () ->
+  let pr = read_pressure_avg10 p () in
+    List.fold_left (fun n (k, v) -> if k = "some" then v else n) 0. pr
+
+let maybe_wait t =
+  Lwt_unix.sleep 1.0 >>= fun () -> (* one new job accepted per second to allow load average to respond *)
+  let rec cool_down () =
+    let cpu = pressure_some "cpu" () in
+    let io = pressure_some "io" () in
+    let mem = pressure_some "memory" () in
+    Log.info (fun f -> f "Pressure: cpu=%.2f io=%.2f memory=%.2f" cpu io mem);
+    if t.in_use = 0 || (cpu = 0. && io = 0. && mem = 0.) then Lwt.return_unit
+    else Lwt_condition.wait t.cond >>= cool_down
+  in cool_down ()
+
 let rec maybe_prune t queue =
   check_docker_partition t >>= function
   | Ok () -> Lwt.return_unit
@@ -266,6 +295,7 @@ let loop ~switch ?obuilder t queue =
         Log.info (fun f -> f "At capacity. Waiting for a build to finish before requesting more...");
         Lwt_condition.wait t.cond >>= loop
       ) else (
+        maybe_wait t >>= fun () ->
         maybe_prune t queue >>= fun () ->
         check_health ~last_healthcheck ~queue obuilder >>= fun () ->
         let outcome, set_outcome = Lwt.wait () in
