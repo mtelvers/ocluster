@@ -184,30 +184,39 @@ let check_docker_partition t =
     if free < prune_threshold then Error `Disk_space_low
     else Ok ()
 
-let read_pressure_avg10 p = fun () ->
-  let ic = open_in ("/proc/pressure/" ^ p) in
-  let try_read () =
-    try Some (input_line ic)
-    with End_of_file -> None
-  in let do_split s =
-    let sp = Str.split (Str.regexp {|[= ]+|}) s in
-      (List.hd sp, float_of_string(List.nth sp 2))
-  in let rec loop acc =
-    match try_read () with
-    | Some s -> loop ((do_split s) :: acc)
-    | None -> close_in ic ; List.rev acc
-  in loop []
-
-let pressure_some p = fun () ->
-  let pr = read_pressure_avg10 p () in
-    List.fold_left (fun n (k, v) -> if k = "some" then v else n) 0. pr
+let get_pressure_some_avg10 ~kind =
+  let rec read_line = function
+    | [] -> raise Not_found
+    | binding::rest ->
+      match String.split_on_char '=' binding with
+      | ["avg10"; pressure] -> float_of_string pressure
+      | [_; _] -> read_line rest
+      | _ -> raise (Failure "")
+  in
+  let rec read_lines ic =
+    match String.split_on_char ' ' (Stdlib.input_line ic) with
+    | "some"::line -> read_line line
+    | _ -> read_lines ic
+  in
+  try
+    let ic = open_in ("/proc/pressure/" ^ kind) in
+    Fun.protect ~finally:(fun () -> close_in ic) (fun () -> read_lines ic)
+  with
+  | Sys_error _ ->
+    Log.warn (fun f -> f "Pressure: Could not open the pressure file for '%s'." kind); 0.0
+  | End_of_file ->
+    Log.warn (fun f -> f "Pressure: Could not get the 'some' line."); 0.0
+  | Failure _ -> (* raised manually or by float_of_string *)
+    Log.warn (fun f -> f "Pressure: Could not parse file."); 0.0
+  | Not_found ->
+    Log.warn (fun f -> f "Pressure: Could not find avg10."); 0.0
 
 let maybe_wait t =
   Lwt_unix.sleep 1.0 >>= fun () -> (* one new job accepted per second to allow load average to respond *)
   let rec cool_down () =
-    let cpu = pressure_some "cpu" () in
-    let io = pressure_some "io" () in
-    let mem = pressure_some "memory" () in
+    let cpu = get_pressure_some_avg10 ~kind:"cpu" in
+    let io = get_pressure_some_avg10 ~kind:"io" in
+    let mem = get_pressure_some_avg10 ~kind:"memory" in
     Log.info (fun f -> f "Pressure: cpu=%.2f io=%.2f memory=%.2f" cpu io mem);
     if t.in_use = 0 || (cpu = 0. && io = 0. && mem = 0.) then Lwt.return_unit
     else Lwt_condition.wait t.cond >>= cool_down
