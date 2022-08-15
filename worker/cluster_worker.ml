@@ -85,6 +85,7 @@ type t = {
   cond : unit Lwt_condition.t;         (* Fires when a build finishes (or switch turned off) *)
   mutable cancel : unit -> unit;       (* Called if switch is turned off *)
   allow_push : string list;            (* Repositories users can push to *)
+  pressure : bool;                     (* true is /proc/pressure exists *)
 }
 
 let docker_push ~switch ~log t hash { Cluster_api.Docker.Spec.target; auth } =
@@ -212,15 +213,17 @@ let get_pressure_some_avg10 ~kind =
     Log.warn (fun f -> f "Pressure: Could not find avg10."); 0.0
 
 let maybe_wait t =
-  Lwt_unix.sleep 1.0 >>= fun () -> (* one new job accepted per second to allow load average to respond *)
-  let rec cool_down () =
-    let cpu = get_pressure_some_avg10 ~kind:"cpu" in
-    let io = get_pressure_some_avg10 ~kind:"io" in
-    let mem = get_pressure_some_avg10 ~kind:"memory" in
-    Log.info (fun f -> f "Pressure: cpu=%.2f io=%.2f memory=%.2f" cpu io mem);
-    if t.in_use = 0 || (cpu < 1. && io < 1. && mem < 1.) then Lwt.return_unit
-    else Lwt_condition.wait t.cond >>= cool_down
-  in cool_down ()
+  match t.pressure with
+  | false -> Lwt.return_unit
+  | true -> Lwt_unix.sleep 1.0 >>= fun () -> (* one new job accepted per second to allow load average to respond *)
+    let rec cool_down () =
+      let cpu = get_pressure_some_avg10 ~kind:"cpu" in
+      let io = get_pressure_some_avg10 ~kind:"io" in
+      let mem = get_pressure_some_avg10 ~kind:"memory" in
+      Log.info (fun f -> f "Pressure: cpu=%.2f io=%.2f memory=%.2f" cpu io mem);
+      if t.in_use = 0 || (cpu < 1. && io < 1. && mem < 1.) then Lwt.return_unit
+      else Lwt_condition.wait t.cond >>= cool_down
+    in cool_down ()
 
 let rec maybe_prune t queue =
   check_docker_partition t >>= function
@@ -512,6 +515,7 @@ let run ?switch ?build ?(allow_push=[]) ?prune_threshold ?obuilder ~update ~capa
     in_use = 0;
     cancel = ignore;
     allow_push;
+    pressure = Sys.file_exists "/proc/pressure"; (* For example, it does not exist on s390x *)
   } in
   Lwt_switch.add_hook_or_exec switch (fun () ->
       Log.info (fun f -> f "Switch turned off. Will shut down.");
