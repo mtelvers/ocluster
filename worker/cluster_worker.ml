@@ -185,13 +185,12 @@ let check_docker_partition t =
     if free < prune_threshold then Error `Disk_space_low
     else Ok ()
 
-let get_pressure_some_avg10 ~kind =
+let get_pressure_some ~kind ~avg =
   let rec read_line = function
     | [] -> raise Not_found
     | binding::rest ->
       match String.split_on_char '=' binding with
-      | ["avg10"; pressure] -> float_of_string pressure
-      | [_; _] -> read_line rest
+      | [avgn; pressure] -> if avgn = avg then float_of_string pressure else read_line rest
       | _ -> raise (Failure "")
   in
   let rec read_lines ic =
@@ -216,17 +215,17 @@ let maybe_wait t =
   match t.pressure with
   | false -> Lwt.return_unit
   | true ->
-    let rec cool_down () =
-      Lwt_unix.sleep 1.0 >>= fun () -> (* one new job accepted per second to allow load average to respond *)
-      let cpu = get_pressure_some_avg10 ~kind:"cpu" in
-      let io = get_pressure_some_avg10 ~kind:"io" in
-      let mem = get_pressure_some_avg10 ~kind:"memory" in
+    Lwt_unix.sleep 1.0 >>= fun () -> (* one new job accepted per second to allow load average to respond *)
+    let rec cool_down avg max () =
+      let cpu = get_pressure_some ~kind:"cpu" ~avg:avg in
+      let io = get_pressure_some ~kind:"io" ~avg:avg in
+      let mem = get_pressure_some ~kind:"memory" ~avg:avg in
       Log.info (fun f -> f "Pressure: cpu=%.2f io=%.2f memory=%.2f" cpu io mem);
-      if t.in_use = 0 || (cpu < 1. && io < 1. && mem < 1.) then Lwt.return_unit
+      if t.in_use = 0 || (cpu < max && io < max && mem < max) then Lwt.return_unit
       else
         let timeout = Lwt_unix.sleep 60.0 in (* Re-check pressure every minute in case it was a statistical anomaly *)
-        Lwt.pick [Lwt_condition.wait t.cond; timeout] >>= cool_down
-    in cool_down ()
+        Lwt.pick [Lwt_condition.wait t.cond; timeout] >>= cool_down "avg60" 0.5
+    in cool_down "avg10" 1.0 ()
 
 let rec maybe_prune t queue =
   check_docker_partition t >>= function
