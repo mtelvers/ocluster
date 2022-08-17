@@ -212,23 +212,26 @@ let get_pressure_some_avg10 ~kind =
   | Not_found ->
     Log.warn (fun f -> f "Pressure: Could not find avg10."); 0.0
 
+let wait_for_job_or_timeout t ~sec =
+  let wait_until_a_job_finishes = Lwt_condition.wait t.cond >|= fun () -> () in
+  let timeout = Lwt_unix.sleep sec >|= fun () -> () in
+  Lwt.pick [wait_until_a_job_finishes; timeout]
+
 let maybe_wait t =
   match t.pressure with
   | false -> Lwt.return_unit
   | true ->
-    let rec cool_down ~threshold =
+    wait_for_job_or_timeout t ~sec:1.0 >>=
+    let rec cool_down () =
       let cpu = get_pressure_some_avg10 ~kind:"cpu" in
       let io = get_pressure_some_avg10 ~kind:"io" in
       let mem = get_pressure_some_avg10 ~kind:"memory" in
       Log.info (fun f -> f "Pressure: cpu=%.2f io=%.2f memory=%.2f" cpu io mem);
-      if t.in_use = 0 || (cpu <= threshold && io <= threshold && mem <= threshold) then Lwt.return_unit
+      if t.in_use = 0 || (cpu <= 1.0 && io <= 1.0 && mem <= 1.0) then Lwt.return_unit
       else
-        let wait_until_a_job_finishes = Lwt_condition.wait t.cond >|= fun () -> 0.0 in
-        let timeout = Lwt_unix.sleep 60.0 >|= fun () -> 0.0 in (* Re-check pressure every minute in case it was a statistical anomaly *)
-        Lwt.pick [wait_until_a_job_finishes; timeout] >>= fun threshold ->
-        cool_down ~threshold
+        wait_for_job_or_timeout t ~sec:10.0 >>= cool_down
     in
-    cool_down ~threshold:0.0
+    cool_down
 
 let rec maybe_prune t queue =
   check_docker_partition t >>= function
