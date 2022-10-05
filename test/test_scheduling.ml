@@ -362,9 +362,9 @@ let test_case name fn =
   Alcotest_lwt.test_case name `Quick @@ fun _ () ->
   Lwt_unix.yield () >>= fun () ->       (* Ensure we're inside the Lwt mainloop. Lwt.pause behaves strangely otherwise. *)
   fn () >>= fun () ->
-  Lwt.pause () >|= fun () ->
-  Prometheus.CollectorRegistry.(collect default)
-  |> Fmt.to_to_string Prometheus_app.TextFormat_0_0_4.output
+  Lwt.pause () >>= fun () ->
+  Prometheus.CollectorRegistry.(collect default) >|= fun data ->
+  Fmt.to_to_string Prometheus_app.TextFormat_0_0_4.output data
   |> String.split_on_char '\n'
   |> List.iter (fun line ->
       if Astring.String.is_prefix ~affix:"scheduler_pool_" line then (
