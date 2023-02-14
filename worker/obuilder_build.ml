@@ -56,6 +56,14 @@ let create ?prune_threshold config =
       cond = Lwt_condition.create ();
     }
 
+let df path =
+  let path_elements = String.split_on_char '/' path in
+  let pool = List.hd (List.rev path_elements) in
+  Lwt_process.pread ("", [| "zpool"; "list"; "-Hp"; "-o"; "capacity"; pool |]) >>= fun s ->
+  match (String.trim s) with
+  | "" -> Lwt.return 0.
+  | s -> Lwt.return (float_of_int (int_of_string s))
+
 (* Prune [t] until [path]'s free space rises above [prune_threshold]. *)
 let do_prune ~path ~prune_threshold t =
   let Builder ((module Builder), builder) = t.builder in
@@ -63,7 +71,8 @@ let do_prune ~path ~prune_threshold t =
     let stop = Unix.gettimeofday () -. prune_margin |> Unix.gmtime in
     let limit = 100 in
     Builder.prune builder ~before:stop limit >>= fun n ->
-    let free = Df.free_space_percent path in
+    df path >>= fun capacity ->
+    let free = 100. -. capacity in
     Log.info (fun f -> f "OBuilder partition: %.0f%% free after pruning %d items" free n);
     if free > prune_threshold then Lwt.return_unit      (* Space problem is fixed! *)
     else if n < limit then (
@@ -80,7 +89,7 @@ let store_path t =
   match t.config.store_spec with
   | `Btrfs path -> path
   | `Rsync (path, _) -> path
-  | `Zfs pool -> "/" ^ pool
+  | `Zfs pool -> pool
 
 (* Check the free space in [t]'s store.
    If less than [t.prune_threshold], spawn a prune operation (if not already running).
@@ -92,7 +101,8 @@ let check_free_space t =
   | Some prune_threshold ->
     let path = store_path t in
     let rec aux () =
-      let free = Df.free_space_percent path in
+      df path >>= fun capacity ->
+      let free = 100. -. capacity in
       Log.info (fun f -> f "OBuilder partition: %.0f%% free" free);
       (* If we're low on space, spawn a pruning thread. *)
       if free < prune_threshold && t.pruning = false then (
