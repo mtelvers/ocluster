@@ -64,12 +64,16 @@ let df path =
   | "" -> Lwt.return 0.
   | s -> Lwt.return (float_of_int (int_of_string s))
 
+let num_results path =
+  let list_files = Sys.readdir (path ^ "/result") in
+  Array.length list_files
+
 (* Prune [t] until [path]'s free space rises above [prune_threshold]. *)
 let do_prune ~path ~prune_threshold t =
   let Builder ((module Builder), builder) = t.builder in
   let rec aux () =
     let stop = Unix.gettimeofday () -. prune_margin |> Unix.gmtime in
-    let limit = 100 in
+    let limit = 10 in
     Builder.prune builder ~before:stop limit >>= fun n ->
     df path >>= fun capacity ->
     let free = 100. -. capacity in
@@ -102,10 +106,11 @@ let check_free_space t =
     let path = store_path t in
     let rec aux () =
       df path >>= fun capacity ->
+      let count = num_results path in
       let free = 100. -. capacity in
-      Log.info (fun f -> f "OBuilder partition: %.0f%% free" free);
+      Log.info (fun f -> f "OBuilder partition: %.0f%% free (%i results)" free count);
       (* If we're low on space, spawn a pruning thread. *)
-      if free < prune_threshold && t.pruning = false then (
+      if (free < prune_threshold || count > 600) && t.pruning = false then (
         t.pruning <- true;
         Lwt.async (fun () ->
             Lwt.finalize
