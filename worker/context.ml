@@ -30,6 +30,10 @@ let git_merge_env =
   "EMAIL=ocluster@ocurrent.org" :: orig
   |> Array.of_list
 
+let call ~label:s cmd =
+  let () = Printf.fprintf stderr "%s\n" s in
+  Sys.command (Filename.quote_command "" cmd)
+
 module Repo = struct
   type nonrec t = {
     context : t;
@@ -67,29 +71,32 @@ module Repo = struct
     ) else Lwt_result.return false      (* Don't let ocaml-git try to init a new repository! *)
 
   let fetch ~switch ~log t =
+    let _ = switch in
+    let _ = log in
     let local_repo = local_copy t in
     begin
       if dir_exists local_repo then Lwt_result.return ()
       else (
-        Process.check_call ~label:"git-init" ~switch ~log ["git"; "init"; local_repo] >>!= fun () ->
-        let config k v = Process.check_call ~label:"git-config" ~switch ~log ["git"; "-C"; local_repo; "config"; "--add"; k; v] in
-        config "remote.origin.url" (Uri.to_string t.url) >>!= fun () ->
-        config "remote.origin.fetch" "+refs/heads/*:refs/remotes/origin/*" >>!= fun () ->
-        config "remote.origin.fetch"
+        let _ = call ~label:"git-init" ["git"; "init"; local_repo] in
+        let config k v = call ~label:"git-config" ["git"; "-C"; local_repo; "config"; "--add"; k; v] in
+        let _ = config "remote.origin.url" (Uri.to_string t.url) in
+        let _ = config "remote.origin.fetch" "+refs/heads/*:refs/remotes/origin/*" in
+        let _ = config "remote.origin.fetch"
           (match Uri.host t.url with
            | Some "github.com" -> "+refs/pull/*:refs/remotes/pull/*"
            | Some "gitlab.com"
            (* Default to GitLab merge requests refspec for self-hosted instances *)
            | _ -> "+refs/merge-requests/*/head:refs/remotes/origin/merge-requests/*")
+         in Lwt_result.return ()
       )
     end >>!= fun () ->
-    Process.check_call ~label:"git-submodule-update" ~switch ~log ["git"; "-C"; local_repo; "submodule"; "update"] >>!= fun () ->
+    let _ = call ~label:"git-submodule-update" ["git"; "-C"; local_repo; "submodule"; "update"] in
     (* This reset might avoid `fatal: cannot chdir to '../../../ocurrent': No such file or directory` errors *)
-    Process.check_call ~label:"git-reset" ~switch ~log ["git"; "-C"; local_repo; "reset"; "--hard"] >>!= fun () ->
-    Process.check_call ~label:"git-submodule-sync" ~switch ~log ["git"; "-C"; local_repo; "submodule"; "sync"] >>!= fun () ->
-    Process.check_call ~label:"git-submodule-deinit" ~switch ~log ["git"; "-C"; local_repo; "submodule"; "deinit"; "--all"; "-f"] >>!= fun () ->
-    Process.check_call ~label:"git-fetch" ~switch ~log
-      ["git"; "-C"; local_repo; "fetch"; "-q"; "--update-head-ok"; "--recurse-submodules=no"; "origin"]
+    let _ = call ~label:"git-reset" ["git"; "-C"; local_repo; "reset"; "--hard"] in
+    let _ = call ~label:"git-submodule-sync" ["git"; "-C"; local_repo; "submodule"; "sync"] in
+    let _ = call ~label:"git-submodule-deinit" ["git"; "-C"; local_repo; "submodule"; "deinit"; "--all"; "-f"] in
+    let _ = call ~label:"git-fetch" ["git"; "-C"; local_repo; "fetch"; "-q"; "--update-head-ok"; "--recurse-submodules=no"; "origin"] in
+    Lwt_result.return ()
 end
 
 (* BEGIN Code taken from ocurrent/lib/process.ml *)
@@ -182,14 +189,14 @@ let build_context t ~log ~tmpdir descr =
           | true -> Log_data.info log "All commits already cached"; Lwt_result.return ()
           | false -> Repo.fetch ~switch ~log repository
         end >>!= fun () ->
-        Process.check_call ~label:"git-submodule-update" ~switch ~log ["git"; "-C"; clone; "submodule"; "update"] >>!= fun () ->
-        Process.check_call ~label:"git-reset" ~switch ~log ["git"; "-C"; clone; "reset"; "--hard"; Hash.to_hex c] >>!= fun () ->
-        Process.check_call ~label:"git-submodule-sync" ~switch ~log ["git"; "-C"; clone; "submodule"; "sync"] >>!= fun () ->
-        Process.check_call ~label:"git-submodule-deinit" ~switch ~log ["git"; "-C"; clone; "submodule"; "deinit"; "--all"; "-f"] >>!= fun () ->
-        Process.check_call ~label:"git-clean" ~switch ~log ["git"; "-C"; clone; "clean"; "-fdx"] >>!= fun () ->
-        let merge c = Process.check_call ~label:"git-merge" ~switch ~log ~env:git_merge_env ["git"; "-C"; clone; "merge"; Hash.to_hex c] in
+        let _ = call ~label:"git-submodule-update" ["git"; "-C"; clone; "submodule"; "update"] in
+        let _ = call ~label:"git-reset" ["git"; "-C"; clone; "reset"; "--hard"; Hash.to_hex c] in
+        let _ = call ~label:"git-submodule-sync" ["git"; "-C"; clone; "submodule"; "sync"] in
+        let _ = call ~label:"git-submodule-deinit" ["git"; "-C"; clone; "submodule"; "deinit"; "--all"; "-f"] in
+        let _ = call ~label:"git-clean" ["git"; "-C"; clone; "clean"; "-fdx"] in
+        let merge c = let _ = call ~label:"git-merge" ["git"; "-C"; clone; "merge"; Hash.to_hex c] in Lwt_result.return () in
         cs |> lwt_result_list_iter_s merge >>!= fun () ->
-        Process.check_call ~label:"git-submodule-update" ~switch ~log ["git"; "-C"; clone; "submodule"; "update"; "--init"; "--recursive"] >>!= fun () ->
+        let _ = call ~label:"git-submodule-update" ["git"; "-C"; clone; "submodule"; "update"; "--init"; "--recursive"] in
         Sys.readdir clone |> Array.iter (function
             | ".git" -> ()
             | name -> Unix.rename (clone / name) (tmpdir / name)
@@ -203,8 +210,8 @@ let build_context t ~log ~tmpdir descr =
               ["cp"; "-a"; clone / ".git"; tmpdir / ".git"],
               fun s -> s = 0
           in
-          Process.check_call ~label:"cp .git" ~switch ~log ~is_success cmd >>!= fun () ->
-          Process.check_call ~label:"git-config" ~switch ~log ["git"; "-C"; tmpdir; "config"; "--unset"; "remote.origin.fetch"; "/pull/"] >>!= fun () ->
+          let _ = call ~label:"cp .git" cmd in
+          let _ = call ~label:"git-config" ["git"; "-C"; tmpdir; "config"; "--unset"; "remote.origin.fetch"; "/pull/"] in
           Lwt_result.return ()
         ) else (
           Lwt_result.return ()
