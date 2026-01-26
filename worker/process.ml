@@ -27,19 +27,37 @@ let exec ~label ~log ~switch ?env ?(stdin="") ?(stderr=`FD_copy Unix.stdout) ?(i
       Lwt.return_unit
     )
   >>= fun () ->
-  let copy_thread = Log_data.copy_from_stream log proc#stdout in
+  (* Wrap copy_from_stream to handle Channel_closed gracefully.
+     On Windows, we may need to close the channel to signal EOF. *)
+  let copy_thread =
+    Lwt.catch
+      (fun () -> Log_data.copy_from_stream log proc#stdout)
+      (function
+        | Lwt_io.Channel_closed _ -> Lwt.return_unit  (* Treat as EOF *)
+        | ex -> Lwt.fail ex)
+  in
   send_to proc#stdin stdin >>= fun stdin_result ->
-  copy_thread >>= fun () -> (* Ensure all data has been copied before returning *)
-  proc#status >|= function
-  | _ when not (Lwt_switch.is_on switch) -> Error `Cancelled
-  | Unix.WEXITED n when is_success n ->
-    begin match stdin_result with
-      | Ok () -> Ok ()
-      | Error (`Msg msg) -> Fmt.error_msg "Failed sending input to %s: %s" label msg
-    end
-  | Unix.WEXITED n -> Error (`Exit_code n)
-  | Unix.WSIGNALED x -> Fmt.error_msg "%s failed with signal %a" label Fmt.Dump.signal x
-  | Unix.WSTOPPED x -> Fmt.error_msg "%s stopped with signal %a" label Fmt.Dump.signal x
+  (* Wait for process to exit first *)
+  proc#status >>= fun status ->
+  (* Process exited. Close stdout to force EOF/Channel_closed. *)
+  Lwt.catch
+    (fun () -> Lwt_io.close proc#stdout)
+    (fun _ -> Lwt.return_unit)
+  >>= fun () ->
+  (* Now wait for copy_thread - it should complete quickly now *)
+  copy_thread >>= fun () ->
+  Lwt.return @@ begin
+    match status with
+    | _ when not (Lwt_switch.is_on switch) -> Error `Cancelled
+    | Unix.WEXITED n when is_success n ->
+      begin match stdin_result with
+        | Ok () -> Ok ()
+        | Error (`Msg msg) -> Fmt.error_msg "Failed sending input to %s: %s" label msg
+      end
+    | Unix.WEXITED n -> Error (`Exit_code n)
+    | Unix.WSIGNALED x -> Fmt.error_msg "%s failed with signal %a" label Fmt.Dump.signal x
+    | Unix.WSTOPPED x -> Fmt.error_msg "%s stopped with signal %a" label Fmt.Dump.signal x
+  end
 
 let check_call ~label ~log ~switch ?env ?stdin ?stderr ?is_success cmd =
   exec ~label ~log ~switch ?env ?stdin ?stderr ?is_success cmd >|= function
