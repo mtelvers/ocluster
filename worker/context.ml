@@ -58,7 +58,7 @@ module Repo = struct
       let rec aux = function
         | [] -> Lwt_result.return true
         | c :: cs ->
-          Lwt_process.exec ~cwd:local_repo ("", [| "git"; "cat-file"; "-e"; Hash.to_hex c |]) >>= function
+          Process.exec ~cwd:local_repo ("", [| "git"; "cat-file"; "-e"; Hash.to_hex c |]) >>= function
           | Unix.WEXITED 0 -> aux cs
           | Unix.WEXITED _ -> Lwt_result.return false
           | _ -> Fmt.failwith "git cat-file crashed!"
@@ -197,7 +197,7 @@ let build_context t ~log ~tmpdir descr =
         if include_git descr then (
           let cmd, is_success =
             if Sys.win32 then
-              ["robocopy"; clone / ".git"; tmpdir / ".git"; "/COPY:DATSO"; "/E"; "/R:0"; "/DCOPY:T"],
+              ["robocopy"; clone / ".git"; tmpdir / ".git"; "/COPY:DATSO"; "/E"; "/R:0"; "/DCOPY:T"; "/NFL"; "/NDL"; "/NJH"; "/NP"],
               fun s -> s = 1
             else
               ["cp"; "-a"; clone / ".git"; tmpdir / ".git"],

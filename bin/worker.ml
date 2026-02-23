@@ -26,8 +26,8 @@ end
 
 let update_docker () =
   let image_name = Printf.sprintf "%s:%s" Self_update.repo Self_update.tag in
-  Lwt_process.exec ("", [| "docker"; "pull"; image_name |]) >|= check_exit_status >>= fun () ->
-  Lwt_process.pread_line ("", [| "docker"; "image"; "inspect"; "-f";
+  Cluster_worker.Process.exec ("", [| "docker"; "pull"; image_name |]) >|= check_exit_status >>= fun () ->
+  Cluster_worker.Process.pread_line ("", [| "docker"; "image"; "inspect"; "-f";
                                  "{{ range index .RepoDigests }}{{ . }} {{ end }}"; "--"; image_name |]) >|= fun new_repo_ids ->
   let new_repo_ids = Astring.String.cuts ~sep:" " new_repo_ids in
   let affix = Self_update.repo ^ "@" in
@@ -37,7 +37,7 @@ let update_docker () =
   | Some id ->
     Logs.info (fun f -> f "Latest service version is %s" id);
     fun () ->
-      Lwt_process.exec ("", [| "docker"; "service"; "update"; "--image"; id; Self_update.service |])
+      Cluster_worker.Process.exec ("", [| "docker"; "service"; "update"; "--image"; id; Self_update.service |])
       >|= check_exit_status
 
 (* Respond to update requests by doing nothing, on the assumption that the
@@ -185,12 +185,13 @@ module Obuilder_config = struct
     Term.(const Obuilder.Store_spec.to_store $ v)
 
   let v =
-    let make native_conf docker_conf qemu_conf = function
+    let make native_conf docker_conf qemu_conf hcs_conf = function
       | `Native, store -> Some (Cluster_worker.Obuilder_config.v (`Native native_conf) store)
       | `Qemu, store -> Some (Cluster_worker.Obuilder_config.v (`Qemu qemu_conf) store)
       | `Docker, store -> Some (Cluster_worker.Obuilder_config.v (`Docker docker_conf) store)
+      | `Hcs, store -> Some (Cluster_worker.Obuilder_config.v (`Hcs hcs_conf) store)
     in
-    Term.(const make $ Obuilder.Native_sandbox.cmdliner $ Obuilder.Docker_sandbox.cmdliner $ Obuilder.Qemu_sandbox.cmdliner $ cmdliner)
+    Term.(const make $ Obuilder.Native_sandbox.cmdliner $ Obuilder.Docker_sandbox.cmdliner $ Obuilder.Qemu_sandbox.cmdliner $ Obuilder.Hcs_sandbox.cmdliner $ cmdliner)
 end
 
 let worker_opts_t =

@@ -99,7 +99,7 @@ let docker_push ~switch ~log t hash { Cluster_api.Docker.Spec.target; auth } =
     let tag_and_push () =
       docker_tag () >>!= fun () ->
       docker_push () >>!= fun () ->
-      Lwt_process.pread_line ("", [| "docker"; "image"; "inspect"; "-f"; "{{ range index .RepoDigests }}{{ . }} {{ end }}"; "--"; target |]) >>= function
+      Process.pread_line ("", [| "docker"; "image"; "inspect"; "-f"; "{{ range index .RepoDigests }}{{ . }} {{ end }}"; "--"; target |]) >>= function
       | "" -> Lwt_result.fail (`Msg "Failed to read RepoDigests for newly-pushed image!")
       | ids ->
         let open Astring in
@@ -113,7 +113,7 @@ let docker_push ~switch ~log t hash { Cluster_api.Docker.Spec.target; auth } =
     | None -> tag_and_push ()
     | Some (user, password) ->
       let login_cmd = docker ["login"; "--password-stdin"; "--username"; user] in
-      Process.exec ~label:"docker-login" ~switch ~log ~stdin:password ~stderr:`Keep login_cmd >>= function
+      Process.run ~label:"docker-login" ~switch ~log ~stdin:password ~stderr:`Keep login_cmd >>= function
       | Error (`Exit_code _) ->
         Lwt_result.fail (`Msg (Fmt.str "Failed to docker-login as %S" user))
       | Error (`Msg _ | `Cancelled as e) -> Lwt_result.fail e
@@ -184,7 +184,7 @@ let check_docker_partition t =
   match t.prune_threshold, t.docker_max_df_size with
   | None, None -> Lwt_result.return ()
   | Some prune_threshold, _ ->
-    Lwt_process.pread_line("", [| "docker"; "info"; "-f"; "{{.DockerRootDir}}" |]) >|= fun line ->
+    Process.pread_line ("", [| "docker"; "info"; "-f"; "{{.DockerRootDir}}" |]) >|= fun line ->
     let trimed_line = String.trim line in
     let free_blocks = Df.free_space_percent trimed_line in
     let free_files = Df.free_files_percent trimed_line in
@@ -193,7 +193,7 @@ let check_docker_partition t =
     else Ok ()
   | _, Some max_df_size ->
     (* Is the first one always the amount of memory the images take up? *)
-    Lwt_process.pread_line ("", [| "docker"; "system"; "df"; "--format"; "{{.Size}}" |]) >|= fun line ->
+    Process.pread_line ("", [| "docker"; "system"; "df"; "--format"; "{{.Size}}" |]) >|= fun line ->
     match convert_memory_string line with
       | None ->
           Log.info (fun f -> f "Failed to calculate max df size from %s" line);
@@ -217,9 +217,9 @@ let rec maybe_prune t queue =
     Log.info (fun f -> f "All jobs finished. Pruning…");
     Prometheus.Summary.time Metrics.docker_prune_time Unix.gettimeofday
       (fun () ->
-         Lwt_process.exec ("", [| "docker"; "system"; "prune"; "-af" |]) >>= function
+         Process.exec ("", [| "docker"; "system"; "prune"; "-af" |]) >>= function
          | Unix.WEXITED 0 ->
-           Lwt_process.exec ("", [| "docker"; "builder"; "prune"; "-af" |])
+           Process.exec ("", [| "docker"; "builder"; "prune"; "-af" |])
          | e -> Lwt.return e
       )
     >>= function

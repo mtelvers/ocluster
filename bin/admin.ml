@@ -75,7 +75,7 @@ let exec () cap_path pool command =
   let jobs = workers |> List.map (fun (w:Cluster_api.Pool_admin.worker_info) ->
       let args = Array.of_list command in
       let args2 = Array.map (fun el -> if el = "{}" then w.name else el) args in
-      Lwt_process.exec ("", args2 ) >|= check_exit_status
+      Cluster_worker.Process.exec ("", args2 ) >|= check_exit_status
     ) in
   Lwt.join jobs
 
