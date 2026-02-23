@@ -26,8 +26,8 @@ end
 
 let update_docker () =
   let image_name = Printf.sprintf "%s:%s" Self_update.repo Self_update.tag in
-  Cluster_worker.Process.exec ("", [| "docker"; "pull"; image_name |]) >|= check_exit_status >>= fun () ->
-  Cluster_worker.Process.pread_line ("", [| "docker"; "image"; "inspect"; "-f";
+  Lwt_process.exec ("", [| "docker"; "pull"; image_name |]) >|= check_exit_status >>= fun () ->
+  Lwt_process.pread_line ("", [| "docker"; "image"; "inspect"; "-f";
                                  "{{ range index .RepoDigests }}{{ . }} {{ end }}"; "--"; image_name |]) >|= fun new_repo_ids ->
   let new_repo_ids = Astring.String.cuts ~sep:" " new_repo_ids in
   let affix = Self_update.repo ^ "@" in
@@ -37,7 +37,7 @@ let update_docker () =
   | Some id ->
     Logs.info (fun f -> f "Latest service version is %s" id);
     fun () ->
-      Cluster_worker.Process.exec ("", [| "docker"; "service"; "update"; "--image"; id; Self_update.service |])
+      Lwt_process.exec ("", [| "docker"; "service"; "update"; "--image"; id; Self_update.service |])
       >|= check_exit_status
 
 (* Respond to update requests by doing nothing, on the assumption that the

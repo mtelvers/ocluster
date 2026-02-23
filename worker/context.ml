@@ -58,7 +58,7 @@ module Repo = struct
       let rec aux = function
         | [] -> Lwt_result.return true
         | c :: cs ->
-          Process.exec ~cwd:local_repo ("", [| "git"; "cat-file"; "-e"; Hash.to_hex c |]) >>= function
+          Lwt_process.exec ~cwd:local_repo ("", [| "git"; "cat-file"; "-e"; Hash.to_hex c |]) >>= function
           | Unix.WEXITED 0 -> aux cs
           | Unix.WEXITED _ -> Lwt_result.return false
           | _ -> Fmt.failwith "git cat-file crashed!"
