@@ -1,8 +1,8 @@
-open Lwt.Infix
-open Capnp_rpc_lwt
+open Capnp_rpc.Std
 
 module Git = Current_git
 module Connection = Connection
+module Cluster_api = Cluster_api_eio
 
 type urgency = [ `Auto | `Always | `Never ]
 
@@ -125,7 +125,7 @@ module Op = struct
         | Docker_build { push_to = Some _; _ } -> Current.Level.Above_average
         | _ -> Current.Level.Average
     in
-    Current.Job.start_with ~pool:build_pool job ?timeout:t.timeout ~level >>= fun build_job ->
+    let build_job = Current.Job.start_with ~pool:build_pool job ?timeout:t.timeout ~level in
     Capability.with_ref build_job @@ fun build_job ->
     Connection.run_job ~job build_job
 

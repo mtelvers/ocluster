@@ -1,7 +1,8 @@
 (library
  (public_name current_ocluster)
  (libraries
-   ocluster-api
+   ocluster-api-eio
+   capnp-rpc
    current
    current.cache
    current_git
@@ -9,6 +10,6 @@
    prometheus
    fmt
    logs
-   lwt
+   eio
    ppx_deriving_yojson.runtime)
  (preprocess (pps ppx_deriving.std ppx_deriving_yojson)))

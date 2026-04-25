@@ -1,6 +1,7 @@
 (** This module provides an OCurrent plugin for building with OCluster. *)
 
 module Connection = Connection
+module Cluster_api = Cluster_api_eio
 
 type t
 (** The configuration for accessing the build cluster. *)

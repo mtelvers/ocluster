@@ -4,15 +4,20 @@
     simple cases, or it can used directly to implement custom pipeline steps if
     that isn't flexible enough. *)
 
-open Capnp_rpc_lwt
+open Capnp_rpc.Std
+
+module Cluster_api = Cluster_api_eio
 
 type t
 
 val create :
-  ?max_pipeline:int -> 
+  ?max_pipeline:int ->
+  sw:Eio.Switch.t ->
   Cluster_api.Raw.Client.Submission.t Sturdy_ref.t ->
   t
-(** [create submission_service] is a connection that submits jobs to [submission_service].
+(** [create ~sw submission_service] is a connection that submits jobs to
+    [submission_service]. The connection lifetime is bound to [sw] —
+    background reconnection fibers are scoped to it.
     @param max_pipeline : how many items to queue up at the scheduler per (pool, urgency). *)
 
 val pool :
@@ -24,7 +29,7 @@ val pool :
   ?secrets:(string * string) list ->
   ?urgent:([`High | `Low] -> bool) ->
   t ->
-  Cluster_api.Raw.Client.Job.t Capnp_rpc_lwt.Capability.t Current.Pool.t
+  Cluster_api.Raw.Client.Job.t Capability.t Current.Pool.t
 (** [pool ~job ~pool ~action ~cache_hint t] is a resource pool, suitable for passing to [Current.Job.start_with].
     Submits [action] to the pool named [pool] at [t].
     If [t] is disconnected, it will keep trying to reconnect until it succeeds.
@@ -36,5 +41,5 @@ val pool :
 val run_job :
   job:Current.Job.t ->
   Cluster_api.Raw.Client.Job.t Capability.t ->
-  (string, [> `Msg of string ]) result Lwt.t
+  (string, [> `Msg of string ]) result
 (** [run_job ~job ocluster_job] tails the log of [ocluster_job] to [job] and then returns the job's result. *)

@@ -30,6 +30,17 @@
   ppx_deriving_yojson))
 
 (package
+ (name ocluster-api-eio)
+ (synopsis "Cap'n Proto API for OCluster (Eio variant)")
+ (description "OCaml bindings for the OCluster Cap'n Proto API, built against capnp-rpc 2.x for Eio consumers (such as the OCurrent 2.0 plugin). The wire protocol is identical to ocluster-api.")
+ (depends
+  (ocaml (>= 5.0.0))
+  (capnp-rpc (>= 2.0))
+  fmt
+  ppx_deriving
+  ppx_deriving_yojson))
+
+(package
  (name ocluster-worker)
  (synopsis "OCluster library for defining workers")
  (description "OCluster library for defining workers")
@@ -87,17 +98,17 @@
  (description
   "Creates a stage in an OCurrent pipeline for submitting jobs to OCluster.")
  (depends
-  (ocluster-api (= :version))
-  (ocaml (>= 4.14.1))
-  (capnp-rpc-unix (and (>= 1.2.3) (< 2.0)))
-  (current (>= 0.6.4))
-  (current_git (>= 0.6.4))
+  (ocluster-api-eio (= :version))
+  (ocaml (>= 5.0.0))
+  (capnp-rpc (>= 2.0))
+  (current (>= 2.0))
+  (current_git (>= 2.0))
   duration
+  (eio (>= 1.0))
   fmt
   logs
-  (lwt (>= 5.6.1))
   ppx_deriving
   ppx_deriving_yojson
   (prometheus (>= 1.2))
-  (current_github (and (>= 0.6.4) :with-test))
-  (current_web (and (>= 0.6.4) :with-test))))
+  (current_github (and (>= 2.0) :with-test))
+  (current_web (and (>= 2.0) :with-test))))
