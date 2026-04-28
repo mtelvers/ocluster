@@ -13,11 +13,13 @@ type t
 val create :
   ?max_pipeline:int ->
   sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Cluster_api.Raw.Client.Submission.t Sturdy_ref.t ->
   t
-(** [create ~sw submission_service] is a connection that submits jobs to
+(** [create ~sw ~clock submission_service] is a connection that submits jobs to
     [submission_service]. The connection lifetime is bound to [sw] —
-    background reconnection fibers are scoped to it.
+    background reconnection fibers are scoped to it. [clock] is used for
+    backoff sleeps when reconnecting.
     @param max_pipeline : how many items to queue up at the scheduler per (pool, urgency). *)
 
 val pool :

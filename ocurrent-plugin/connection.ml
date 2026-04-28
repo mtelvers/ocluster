@@ -27,6 +27,7 @@ type sched_state =
 
 type t = {
   sw : Eio.Switch.t;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
   sr : [`Submission_f4e8a768b32a7c42] Sturdy_ref.t;
   mutable sched : sched_state;
   mu : Eio.Mutex.t;
@@ -61,7 +62,7 @@ let sched ~job t =
           Eio.Promise.resolve r cap
         | exception ex ->
           Log.warn (fun f -> f "Error connecting to build cluster (will retry): %a" Fmt.exn ex);
-          Eio.Time.sleep (Eio.Stdenv.clock (Current.Engine_env.get_env ())) 10.0;
+          Eio.Time.sleep t.clock 10.0;
           aux ()
       in
       aux ());
@@ -184,9 +185,9 @@ let run_job ~job build_job =
     | Error (`Capnp e) -> Error (`Msg (Fmt.to_to_string Capnp_rpc.Error.pp e))
     | Ok _ as x -> x
 
-let create ?(max_pipeline=200) ~sw sr =
+let create ?(max_pipeline=200) ~sw ~clock sr =
   let rate_limits = Hashtbl.create 10 in
-  { sw; sr; sched = Disconnected; mu = Eio.Mutex.create (); rate_limits; max_pipeline }
+  { sw; clock; sr; sched = Disconnected; mu = Eio.Mutex.create (); rate_limits; max_pipeline }
 
 let pool ~job ~pool ~action ~cache_hint ?src ?secrets ?(urgent=urgent_if_high) t =
   Current.Pool.of_fn ~label:"OCluster" @@ submit ~job ~pool ~action ~cache_hint ~urgent ?src ?secrets t
