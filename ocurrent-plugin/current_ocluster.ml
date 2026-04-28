@@ -15,12 +15,94 @@ type docker_build = {
   push_target : target option;
 } [@@deriving to_yojson]
 
+module type S = sig
+  type t
+
+  val v :
+    ?timeout:Duration.t ->
+    ?push_auth:(string * string) ->
+    ?secrets:(string * string) list ->
+    ?urgent:urgency ->
+    unit ->
+    t
+
+  val with_timeout : Duration.t option -> t -> t
+  val with_push_auth : (string * string) option -> t -> t
+  val with_secrets : (string * string) list -> t -> t
+  val with_urgent : urgency -> t -> t
+
+  val build :
+    ?level:Current.Level.t ->
+    ?label:string ->
+    ?cache_hint:string ->
+    t ->
+    pool:string ->
+    src:Current_git.Commit_id.t list Current.t ->
+    options:Cluster_api.Docker.Spec.options ->
+    [ `Contents of string Current.t | `Path of string ] ->
+    unit Current.t
+
+  val build_and_push :
+    ?level:Current.Level.t ->
+    ?label:string ->
+    ?cache_hint:string ->
+    t ->
+    push_target:Cluster_api.Docker.Image_id.t ->
+    pool:string ->
+    src:Current_git.Commit_id.t list Current.t ->
+    options:Cluster_api.Docker.Spec.options ->
+    [ `Contents of string Current.t | `Path of string ] ->
+    string Current.t
+
+  val build_obuilder :
+    ?level:Current.Level.t ->
+    ?label:string ->
+    ?cache_hint:string ->
+    t ->
+    pool:string ->
+    src:Current_git.Commit_id.t list Current.t ->
+    Cluster_api.Obuilder_job.Spec.t Current.t ->
+    unit Current.t
+
+  module Raw : sig
+    val build :
+      ?level:Current.Level.t ->
+      ?cache_hint:string ->
+      t ->
+      pool:string ->
+      src:Current_git.Commit_id.t list ->
+      options:Cluster_api.Docker.Spec.options ->
+      [ `Contents of string | `Path of string ] ->
+      unit Current.Primitive.t
+
+    val build_and_push :
+      ?level:Current.Level.t ->
+      ?cache_hint:string ->
+      t ->
+      push_target:Cluster_api.Docker.Image_id.t ->
+      pool:string ->
+      src:Current_git.Commit_id.t list ->
+      options:Cluster_api.Docker.Spec.options ->
+      [ `Contents of string | `Path of string ] ->
+      string Current.Primitive.t
+
+    val build_obuilder :
+      ?level:Current.Level.t ->
+      ?cache_hint:string ->
+      t ->
+      pool:string ->
+      src:Current_git.Commit_id.t list ->
+      Cluster_api.Obuilder_job.Spec.t ->
+      unit Current.Primitive.t
+  end
+end
+
 [@@@ocaml.warning "-67"]
 
 module Make () (E : sig
   val caps : Current_cache.caps
   val connection : Connection.t
-end) = struct
+end) : S = struct
   (* Per-call defaults. May be copied and modified per job via [with_*]. *)
   type t = {
     timeout : Duration.t option;

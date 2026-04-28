@@ -10,12 +10,7 @@ type urgency = [
   | `Never      (** No builds will be urgent. *)
 ]
 
-[@@@ocaml.warning "-67"]
-
-module Make () (_ : sig
-  val caps : Current_cache.caps
-  val connection : Connection.t
-end) : sig
+module type S = sig
   type t
   (** Per-call defaults for one cluster instance. Build with {!v} and tweak
       via [with_*] helpers. *)
@@ -117,3 +112,10 @@ end) : sig
       unit Current.Primitive.t
   end
 end
+
+[@@@ocaml.warning "-67"]
+
+module Make () (_ : sig
+  val caps : Current_cache.caps
+  val connection : Connection.t
+end) : S
