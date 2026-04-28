@@ -99,10 +99,11 @@ let urgent_if_high = function
   | `Low -> false
 
 (* Called by [Current.Pool.of_fn] once the confirmation threshold and
-   fiber-level cancellation allow the job to be submitted. We register
-   ticket cancellation on [sw] so that exiting the job's switch tears
-   down our slot at the scheduler. *)
-let submit ~job ~pool ~action ~cache_hint ?src ?secrets ~urgent t ~priority ~sw =
+   fiber-level cancellation allow the job to be submitted. Cancellation
+   is wired through [sw]: the [Switch.on_release] hooks below release
+   the rate-limit slot and cancel the scheduler ticket when the job's
+   switch is torn down, so we don't need to use [~register_cancel]. *)
+let submit ~job ~pool ~action ~cache_hint ?src ?secrets ~urgent t ~priority ~sw ~register_cancel:_ =
   let urgent = urgent priority in
   let rec aux () =
     let sched = with_state Metrics.queue_connect (fun () -> sched ~job t) in
