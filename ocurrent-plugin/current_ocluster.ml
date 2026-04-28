@@ -97,12 +97,8 @@ module type S = sig
   end
 end
 
-[@@@ocaml.warning "-67"]
-
-module Make () (E : sig
-  val caps : Current_cache.caps
-  val connection : Connection.t
-end) : S = struct
+let make ~caps ~connection : (module S) =
+  (module struct
   (* Per-call defaults. May be copied and modified per job via [with_*]. *)
   type t = {
     timeout : Duration.t option;
@@ -198,7 +194,7 @@ end) : S = struct
         | `Never -> false
         | `Auto -> priority = `High
       in
-      let build_pool = Connection.pool ~job ~pool ~action ~cache_hint ~urgent ?src ~secrets:t.secrets E.connection in
+      let build_pool = Connection.pool ~job ~pool ~action ~cache_hint ~urgent ?src ~secrets:t.secrets connection in
       let level =
         match t.level with
         | Some level -> level
@@ -227,7 +223,7 @@ end) : S = struct
 
   module Build = Current_cache.Make(Op)
 
-  let build_cache = Build.create ~caps:E.caps
+  let build_cache = Build.create ~caps
 
   open Current.Syntax
 
@@ -302,4 +298,4 @@ end) : S = struct
     let> spec = spec
     and> src = src in
     Raw.build_obuilder ?level ?cache_hint t ~pool ~src spec
-end
+end)

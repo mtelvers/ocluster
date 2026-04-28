@@ -113,9 +113,10 @@ module type S = sig
   end
 end
 
-[@@@ocaml.warning "-67"]
-
-module Make () (_ : sig
-  val caps : Current_cache.caps
-  val connection : Connection.t
-end) : S
+val make :
+  caps:Current_cache.caps ->
+  connection:Connection.t ->
+  (module S)
+(** [make ~caps ~connection] is a fresh OCluster plugin instance bound to
+    the given capabilities and scheduler connection. Each call returns a
+    module with its own caches; unpack it with [(val ...)]. *)
