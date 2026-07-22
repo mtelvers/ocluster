@@ -29,3 +29,16 @@ val with_build_context :
   ('a, [`Cancelled | `Msg of string]) Lwt_result.t
 (** [with_build_context t ~log descr fn] runs [fn dir], where [dir] is a
     temporary directory containing the requested build context. *)
+
+val ensure_opam_repository :
+  t ->
+  switch:Lwt_switch.t ->
+  log:Log_data.t ->
+  url:string ->
+  commit:string ->
+  (string, [`Cancelled | `Msg of string]) Lwt_result.t
+(** [ensure_opam_repository t ~switch ~log ~url ~commit] makes sure [commit] of
+    [url] is present in the local Git mirror, fetching it if necessary but
+    {e without} checking out a worktree, and returns the path to the mirror
+    repository. The result is suitable for [day10 --opam-repository <path>:<commit>],
+    which reads the commit directly from the Git object database. *)

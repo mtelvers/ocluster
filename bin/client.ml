@@ -40,6 +40,36 @@ type submit_options_common = {
   secrets : (string * string) list;
 }
 
+type day10_fields = {
+  verb : string;
+  opam_repository : string;
+  opam_repository_commit : string;
+  ocaml_version : string;
+  package : string;
+  with_test : bool;
+  arch : string;
+  os : string;
+  os_family : string;
+  os_distribution : string;
+  os_version : string;
+}
+
+(* Build a Custom job payload for kind="day10". *)
+let day10_payload fields builder =
+  let module B = Cluster_api.Raw.Builder.Day10 in
+  let d = B.init_pointer builder in
+  B.verb_set d fields.verb;
+  B.opam_repository_set d fields.opam_repository;
+  B.opam_repository_commit_set d fields.opam_repository_commit;
+  B.ocaml_version_set d fields.ocaml_version;
+  B.package_set d fields.package;
+  B.with_test_set d fields.with_test;
+  B.arch_set d fields.arch;
+  B.os_set d fields.os;
+  B.os_family_set d fields.os_family;
+  B.os_distribution_set d fields.os_distribution;
+  B.os_version_set d fields.os_version
+
 let get_action = function
   | `Docker (dockerfile, push_to, options) ->
     begin match dockerfile with
@@ -52,6 +82,10 @@ let get_action = function
   | `Obuilder path ->
     Lwt_io.(with_file ~mode:input) path (Lwt_io.read ?count:None) >|= fun spec ->
     Cluster_api.Submission.obuilder_build spec
+  | `Day10 fields ->
+    Lwt.return @@
+    Cluster_api.Submission.custom_build
+      (Cluster_api.Custom.v ~kind:"day10" (day10_payload fields))
 
 let read_whole_file path =
   let ic = open_in_bin path in
@@ -281,7 +315,101 @@ let submit_obuilder =
   Cmd.v info
     Term.(const submit $ Logging.cmdliner $ submit_options_common $ submit_obuilder_options)
 
-let cmds = [submit_docker; submit_obuilder]
+(* ---- day10 submission ---- *)
+
+let day10_verb =
+  Arg.value @@ Arg.opt Arg.string "health-check" @@
+  Arg.info ~doc:"day10 sub-command: health-check | revdeps | list." ~docv:"VERB" ["verb"]
+
+let day10_opam_repository =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info
+    ~doc:"opam-repository Git URL, used to locate the worker's mirror. \
+          Empty = default ocaml/opam-repository."
+    ~docv:"URL" ["opam-repository"]
+
+let day10_opam_repository_commit =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info
+    ~doc:"opam-repository commit the job builds against (read from the mirror)."
+    ~docv:"SHA" ["opam-repository-commit"]
+
+let day10_ocaml_version =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info
+    ~doc:"OCaml version to pass to day10 (e.g. ocaml.5.3.0). Empty = day10 default."
+    ~docv:"VERSION" ["ocaml-version"]
+
+let day10_package =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info ~doc:"Target package for health-check / revdeps." ~docv:"PKG" ["package"]
+
+let day10_with_test =
+  Arg.value @@ Arg.flag @@
+  Arg.info ~doc:"Pass --with-test to day10." ["with-test"]
+
+let day10_arch =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info ~doc:"Target arch (e.g. x86_64, arm64). Empty = host." ~docv:"ARCH" ["arch"]
+
+let day10_os =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info ~doc:"Target os (e.g. linux). Empty = host." ~docv:"OS" ["os"]
+
+let day10_os_family =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info ~doc:"Target os-family (e.g. debian). Empty = host." ~docv:"FAMILY" ["os-family"]
+
+let day10_os_distribution =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info ~doc:"Target os-distribution (e.g. ubuntu). Empty = host." ~docv:"DISTRO" ["os-distribution"]
+
+let day10_os_version =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info ~doc:"Target os-version (e.g. 24.04). Empty = host." ~docv:"VERSION" ["os-version"]
+
+let submit_day10_options =
+  let make verb opam_repository opam_repository_commit ocaml_version package with_test
+      arch os os_family os_distribution os_version =
+    `Day10 {
+      verb;
+      opam_repository;
+      opam_repository_commit;
+      ocaml_version;
+      package;
+      with_test;
+      arch;
+      os;
+      os_family;
+      os_distribution;
+      os_version;
+    }
+  in
+  Term.(const make
+        $ day10_verb $ day10_opam_repository $ day10_opam_repository_commit
+        $ day10_ocaml_version $ day10_package $ day10_with_test
+        $ day10_arch $ day10_os $ day10_os_family
+        $ day10_os_distribution $ day10_os_version)
+
+let submit_day10 =
+  let doc = "Submit a day10 job to the scheduler." in
+  let man = [
+    `S Manpage.s_description;
+    `P "Submit a Custom job (kind=\"day10\") that runs \
+        `day10 <verb> --opam-repository <mirror>:<commit> …` on the worker. \
+        The worker resolves the opam-repository commit against its local Git \
+        mirror; no repository/commit positionals are needed.";
+    `P "Example:";
+    `Pre "  ocluster-client submit-day10 -c submission.cap --pool=linux-x86_64 \
+          --verb=health-check --opam-repository-commit=abc123def456 \
+          --ocaml-version=ocaml.5.3.0 --os-distribution=debian --os-version=13 \
+          --package=fmt.0.9.0";
+  ] in
+  let info = Cmd.info "submit-day10" ~doc ~man in
+  Cmd.v info
+    Term.(const submit $ Logging.cmdliner $ submit_options_common $ submit_day10_options)
+
+let cmds = [submit_docker; submit_obuilder; submit_day10]
 
 let () =
   let doc = "a command-line client for the ocluster-scheduler" in

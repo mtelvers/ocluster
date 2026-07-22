@@ -49,6 +49,46 @@ struct Custom {
   # A custom job with a dynamic payload
 }
 
+struct Day10 {
+  # Payload for Custom jobs with kind "day10". The worker resolves
+  # opamRepositoryCommit against its local opam-repository Git mirror and runs
+  # `day10 <verb> --opam-repository <mirror>:<commit> ...`, streaming output to
+  # the job log. See worker/day10_dispatch.ml.
+
+  verb @0 :Text;
+  # day10 sub-command: "health-check" | "revdeps" | "list" | "build" | "solve".
+
+  opamRepository @1 :Text;
+  # opam-repository Git URL, used to locate the worker's mirror.
+  # Empty means the default ocaml/opam-repository.
+
+  opamRepositoryCommit @2 :Text;
+  # opam-repository commit the job reads (via `git archive` from the mirror).
+
+  opamRepositoryBase @3 :Text;
+  # Optional base commit for a PR merge (opam-repo-ci). Not yet implemented.
+
+  ocamlVersion @4 :Text;
+  # --ocaml-version, e.g. "ocaml.5.3.0". Empty means day10's default.
+
+  package @5 :Text;
+  # Target package for health-check / revdeps.
+
+  withTest @6 :Bool;
+  withDoc @7 :Bool;
+  lowerBound @8 :Bool;
+
+  duneArgs @9 :List(Text);
+  # Extra dune arguments (build verb only).
+
+  arch @10 :Text;
+  os @11 :Text;
+  osFamily @12 :Text;
+  osDistribution @13 :Text;
+  osVersion @14 :Text;
+  # Target variant overrides; empty means day10 detects from the host.
+}
+
 struct Secret {
   id @0 :Text;
   # The secret id.

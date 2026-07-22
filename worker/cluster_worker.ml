@@ -391,7 +391,7 @@ let try_unlink file =
   if Sys.file_exists file then Lwt_unix.unlink file
   else Lwt.return_unit
 
-let default_build ?obuilder ~switch ~log ~src ~secrets = function
+let default_build ?obuilder ?day10_cache ~state_dir ~switch ~log ~src ~secrets = function
   | `Docker (dockerfile, options) ->
     let iid_file = Filename.temp_file "build-worker-" ".iid" in
     Lwt_list.map_p (fun (id, value) -> create_secret_file value >|= fun fname -> id, fname) secrets >>= fun secret_files ->
@@ -431,8 +431,18 @@ let default_build ?obuilder ~switch ~log ~src ~secrets = function
     | Some builder -> Obuilder_build.build builder ~switch ~log ~spec ~src_dir:src ~secrets
   end
   | `Custom c ->
-    Log.warn (fun f -> f "The default cluster_worker build does not support any custom jobs (kind: %s)" (Cluster_api.Custom.kind c));
-    Lwt.return @@ Error (`Msg "Unsupported custom job")
+    begin match Cluster_api.Custom.kind c with
+    | "day10" ->
+      begin match day10_cache with
+      | Some cache_dir -> Day10_dispatch.run ~cache_dir ~state_dir ~switch ~log ~src c
+      | None ->
+        Log.warn (fun f -> f "Received a \"day10\" job but this worker has no --day10-cache configured");
+        Lwt.return @@ Error (`Msg "day10 jobs are not enabled on this worker (set --day10-cache)")
+      end
+    | kind ->
+      Log.warn (fun f -> f "The default cluster_worker build does not support any custom jobs (kind: %s)" kind);
+      Lwt.return @@ Error (`Msg "Unsupported custom job")
+    end
 
 let collect_external_metric uri =
   Lwt.catch
@@ -494,7 +504,7 @@ let self_update ~update t =
        Lwt_result.fail (`Msg (Printexc.to_string ex))
     )
 
-let run ?switch ?build ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_threshold ?docker_max_df_size ?(obuilder_prune_threshold = 30.0) ?(obuilder_prune_limit = 100) ?obuilder ?(additional_metrics=[]) ~update ~capacity ~name ~state_dir registration_service =
+let run ?switch ?build ?day10_cache ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_threshold ?docker_max_df_size ?(obuilder_prune_threshold = 30.0) ?(obuilder_prune_limit = 100) ?obuilder ?(additional_metrics=[]) ~update ~capacity ~name ~state_dir registration_service =
   begin match prune_threshold, docker_max_df_size with
     | None, None -> Log.info (fun f -> f "Prune threshold not set and docker max df size is not. Will not check for low disk-space!")
     | None, Some size -> Log.info (fun f -> f "Pruning docker whenever the memory used exceeds %3.2fGB" size)
@@ -508,7 +518,7 @@ let run ?switch ?build ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_thr
   let build =
     match build with
     | Some x -> x
-    | None -> default_build ?obuilder
+    | None -> default_build ?obuilder ?day10_cache ~state_dir
   in
   let t = {
     name;

@@ -14,12 +14,16 @@ type build =
   job_spec ->
   (string, [`Cancelled | `Msg of string]) Lwt_result.t
 
-val default_build : ?obuilder:Obuilder_build.t -> build
-(** The default build that is used if no [build] argument is given to {! run}. *)
+val default_build : ?obuilder:Obuilder_build.t -> ?day10_cache:string -> state_dir:string -> build
+(** The default build that is used if no [build] argument is given to {! run}.
+    @param day10_cache When set, enables [Custom] jobs of kind ["day10"] and is
+      used as day10's build-cache directory (passed as [--cache-dir]). When
+      unset, day10 jobs are rejected. *)
 
 val run :
   ?switch:Lwt_switch.t ->
   ?build:build ->
+  ?day10_cache:string ->
   ?allow_push:string list ->
   ?healthcheck_period:float ->
   ?prune_threshold:float ->
@@ -39,6 +43,8 @@ val run :
     @param switch Turning this off causes the builder to exit (for unit-tests).
     @param build Used to override the default build action (for unit-tests or custom job
       specifications).
+    @param day10_cache When set, enables [Custom] jobs of kind ["day10"] and is used as
+      day10's build-cache directory. When unset, day10 jobs are rejected.
     @param allow_push Docker repositories to which results can be pushed.
     @param healthcheck_period Time period, in seconds, at which the health of the worker is checked.
     @param prune_threshold Stop and run [docker system prune -af] if free-space is less than this
