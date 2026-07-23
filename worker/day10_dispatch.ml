@@ -33,8 +33,13 @@ let day10_argv ~cache_dir ~opam_repo d =
   let package = R.package_get d in
   (* [list] does not accept --cache-dir; every other verb requires it. *)
   let cache_flag = match verb with "list" -> [] | _ -> [ "--cache-dir"; cache_dir ] in
+  (* health-check exits 0 regardless of the package result; --log makes day10
+     emit the full build log (and terminal marker) so the client can classify
+     the outcome and show why a build failed. *)
+  let log_flag = match verb with "health-check" -> [ "--log" ] | _ -> [] in
   [ "day10"; verb ]
   @ cache_flag
+  @ log_flag
   @ [ "--opam-repository"; opam_repo ]
   @ opt "ocaml-version" (R.ocaml_version_get d)
   @ opt "arch" (R.arch_get d)
