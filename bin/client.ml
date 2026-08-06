@@ -47,6 +47,8 @@ type day10_fields = {
   ocaml_version : string;
   package : string;
   with_test : bool;
+  with_doc : bool;
+  dune_args : string list;
   arch : string;
   os : string;
   os_family : string;
@@ -64,6 +66,8 @@ let day10_payload fields builder =
   B.ocaml_version_set d fields.ocaml_version;
   B.package_set d fields.package;
   B.with_test_set d fields.with_test;
+  B.with_doc_set d fields.with_doc;
+  let _ = B.dune_args_set_list d fields.dune_args in
   B.arch_set d fields.arch;
   B.os_set d fields.os;
   B.os_family_set d fields.os_family;
@@ -348,6 +352,17 @@ let day10_with_test =
   Arg.value @@ Arg.flag @@
   Arg.info ~doc:"Pass --with-test to day10." ["with-test"]
 
+let day10_with_doc =
+  Arg.value @@ Arg.flag @@
+  Arg.info ~doc:"Pass --with-doc to day10 (build verb)." ["with-doc"]
+
+let day10_dune_args =
+  Arg.value @@ Arg.opt_all Arg.string [] @@
+  Arg.info
+    ~doc:"Extra dune argument passed after the project directory for `day10 build` \
+          (repeatable), e.g. --dune-arg=@install --dune-arg=@check --dune-arg=@runtest."
+    ~docv:"ARG" ["dune-arg"]
+
 let day10_arch =
   Arg.value @@ Arg.opt Arg.string "" @@
   Arg.info ~doc:"Target arch (e.g. x86_64, arm64). Empty = host." ~docv:"ARCH" ["arch"]
@@ -369,8 +384,8 @@ let day10_os_version =
   Arg.info ~doc:"Target os-version (e.g. 24.04). Empty = host." ~docv:"VERSION" ["os-version"]
 
 let submit_day10_options =
-  let make verb opam_repository opam_repository_commit ocaml_version package with_test
-      arch os os_family os_distribution os_version =
+  let make verb opam_repository opam_repository_commit ocaml_version package with_test with_doc
+      dune_args arch os os_family os_distribution os_version =
     `Day10 {
       verb;
       opam_repository;
@@ -378,6 +393,8 @@ let submit_day10_options =
       ocaml_version;
       package;
       with_test;
+      with_doc;
+      dune_args;
       arch;
       os;
       os_family;
@@ -387,8 +404,8 @@ let submit_day10_options =
   in
   Term.(const make
         $ day10_verb $ day10_opam_repository $ day10_opam_repository_commit
-        $ day10_ocaml_version $ day10_package $ day10_with_test
-        $ day10_arch $ day10_os $ day10_os_family
+        $ day10_ocaml_version $ day10_package $ day10_with_test $ day10_with_doc
+        $ day10_dune_args $ day10_arch $ day10_os $ day10_os_family
         $ day10_os_distribution $ day10_os_version)
 
 let submit_day10 =

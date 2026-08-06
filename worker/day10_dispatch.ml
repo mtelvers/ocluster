@@ -25,18 +25,28 @@ let read_payload (custom : Cluster_api.Custom.recv) : Cluster_api.Raw.Reader.Day
 (** Build the argv for [day10 <verb>]. Empty Text fields are omitted so day10
     falls back to its own defaults / host detection. [opam_repo] is the value
     for [--opam-repository] (a [<mirror>:<commit>] spec). *)
-let day10_argv ~cache_dir ~opam_repo d =
+let day10_argv ~cache_dir ~opam_repo ~src d =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let verb = R.verb_get d in
   let opt name v = match v with "" -> [] | v -> [ "--" ^ name; v ] in
   let flag name b = if b then [ "--" ^ name ] else [] in
-  let package = R.package_get d in
   (* [list] does not accept --cache-dir; every other verb requires it. *)
   let cache_flag = match verb with "list" -> [] | _ -> [ "--cache-dir"; cache_dir ] in
-  (* health-check exits 0 regardless of the package result; --log makes day10
-     emit the full build log (and terminal marker) so the client can classify
-     the outcome and show why a build failed. *)
-  let log_flag = match verb with "health-check" -> [ "--log" ] | _ -> [] in
+  (* --log makes day10 emit the full build log (and terminal marker) so the
+     client can show why a build failed. Accepted by build and health-check. *)
+  let log_flag = match verb with "build" | "health-check" -> [ "--log" ] | _ -> [] in
+  (* --with-test: build + health-check; --with-doc: build only. *)
+  let test_flag = match verb with "build" | "health-check" -> flag "with-test" (R.with_test_get d) | _ -> [] in
+  let doc_flag = match verb with "build" -> flag "with-doc" (R.with_doc_get d) | _ -> [] in
+  (* Positional arguments per verb:
+     - build: SRC (the checked-out project) followed by trailing dune args
+     - list:  none
+     - health-check / revdeps: the package name *)
+  let positional = match verb with
+    | "build" -> src :: R.dune_args_get_list d
+    | "list" -> []
+    | _ -> (match R.package_get d with "" -> [] | p -> [ p ])
+  in
   [ "day10"; verb ]
   @ cache_flag
   @ log_flag
@@ -47,9 +57,9 @@ let day10_argv ~cache_dir ~opam_repo d =
   @ opt "os-family" (R.os_family_get d)
   @ opt "os-distribution" (R.os_distribution_get d)
   @ opt "os-version" (R.os_version_get d)
-  @ flag "with-test" (R.with_test_get d)
-  (* [list] takes no package argument; the others take it as a positional. *)
-  @ (match verb with "list" -> [] | _ -> if package = "" then [] else [ package ])
+  @ test_flag
+  @ doc_flag
+  @ positional
 
 let log_summary log d ~mirror ~cache_dir =
   let module R = Cluster_api.Raw.Reader.Day10 in
@@ -77,19 +87,21 @@ let log_summary log d ~mirror ~cache_dir =
        (pp_or_default (R.os_version_get d))
        (R.with_test_get d))
 
-let run ~cache_dir ~state_dir ~switch ~log ~src:_ custom =
+let run ~cache_dir ~state_dir ~switch ~log ~src custom =
   let d = read_payload custom in
   let module R = Cluster_api.Raw.Reader.Day10 in
   let verb = R.verb_get d in
   let commit = R.opam_repository_commit_get d in
   let url = match R.opam_repository_get d with "" -> default_opam_repository | u -> u in
   match verb with
-  | "build" | "solve" ->
+  | "solve" ->
     Lwt.return (Error (`Msg (Fmt.str "day10 verb %S is not yet implemented in the ocluster dispatch" verb)))
   | _ when commit = "" ->
     Lwt.return (Error (`Msg "day10 job requires opamRepositoryCommit"))
   | _ when R.opam_repository_base_get d <> "" ->
     Lwt.return (Error (`Msg "day10 PR-merge (opamRepositoryBase) is not yet implemented"))
+  | "build" when src = "" ->
+    Lwt.return (Error (`Msg "day10 build requires a source directory (set the job's repository/commits)"))
   | _ ->
     let ctx = Context.v ~state_dir in
     Context.ensure_opam_repository ctx ~switch ~log ~url ~commit >>= function
@@ -97,11 +109,23 @@ let run ~cache_dir ~state_dir ~switch ~log ~src:_ custom =
     | Ok mirror ->
       log_summary log d ~mirror ~cache_dir;
       let opam_repo = Fmt.str "%s:%s" mirror commit in
-      let cmd = day10_argv ~cache_dir ~opam_repo d in
-      Log_data.write log
-        (Fmt.str "+ %s\n" (String.concat " " (List.map Filename.quote cmd)));
-      Log.info (fun f -> f "Dispatching day10 %s (opam-repo %s)" verb opam_repo);
-      Process.check_call ~label:"day10" ~switch ~log cmd >|= function
-      | Ok () -> Ok (Fmt.str "day10 %s succeeded" verb)
-      | Error `Cancelled as e -> e
-      | Error (`Msg _) as e -> e
+      let cmd = day10_argv ~cache_dir ~opam_repo ~src d in
+      (* [day10 build] runs dune in [src] and writes _build there. The checkout
+         is created by the worker (root-owned, per-job, ephemeral) but day10
+         builds as its own container user, so make it writable first. Safe:
+         [src] is a unique per-job temp dir, not shared between jobs. *)
+      let prepare =
+        if verb = "build" then
+          Process.check_call ~label:"chmod-src" ~switch ~log [ "chmod"; "-R"; "a+rwX"; src ]
+        else Lwt_result.return ()
+      in
+      prepare >>= (function
+      | Error e -> Lwt.return (Error e)
+      | Ok () ->
+        Log_data.write log
+          (Fmt.str "+ %s\n" (String.concat " " (List.map Filename.quote cmd)));
+        Log.info (fun f -> f "Dispatching day10 %s (opam-repo %s)" verb opam_repo);
+        Process.check_call ~label:"day10" ~switch ~log cmd >|= function
+        | Ok () -> Ok (Fmt.str "day10 %s succeeded" verb)
+        | Error `Cancelled as e -> e
+        | Error (`Msg _) as e -> e)
