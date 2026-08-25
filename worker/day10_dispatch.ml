@@ -38,6 +38,14 @@ let day10_argv ~cache_dir ~opam_repo ~src d =
   (* --with-test: build + health-check; --with-doc: build only. *)
   let test_flag = match verb with "build" | "health-check" -> flag "with-test" (R.with_test_get d) | _ -> [] in
   let doc_flag = match verb with "build" -> flag "with-doc" (R.with_doc_get d) | _ -> [] in
+  (* --only-packages (build/exec only) restricts which of the project's .opam
+     files count as local roots. Empty = all (day10's default). Repeatable. *)
+  let only_packages_flags =
+    match verb with
+    | "build" | "exec" ->
+      List.concat_map (fun p -> [ "--only-packages"; p ]) (R.only_packages_get_list d)
+    | _ -> []
+  in
   (* Positional arguments per verb:
      - build: SRC (the checked-out project) followed by trailing dune args
      - list:  none
@@ -59,6 +67,7 @@ let day10_argv ~cache_dir ~opam_repo ~src d =
   @ opt "os-version" (R.os_version_get d)
   @ test_flag
   @ doc_flag
+  @ only_packages_flags
   @ positional
 
 let log_summary log d ~mirror ~cache_dir =
@@ -125,7 +134,12 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
         Log_data.write log
           (Fmt.str "+ %s\n" (String.concat " " (List.map Filename.quote cmd)));
         Log.info (fun f -> f "Dispatching day10 %s (opam-repo %s)" verb opam_repo);
-        Process.check_call ~label:"day10" ~switch ~log cmd >|= function
+        (* On cancel, send SIGTERM so day10 can tear down its runc container,
+           overlay mount and temp dir; SIGKILL only if it hasn't exited after
+           the grace period. *)
+        Process.check_call ~label:"day10" ~switch ~log
+          ~on_cancel:(`Terminate_then_kill 60.) cmd
+        >|= function
         | Ok () -> Ok (Fmt.str "day10 %s succeeded" verb)
         | Error `Cancelled as e -> e
         | Error (`Msg _) as e -> e)

@@ -87,6 +87,13 @@ struct Day10 {
   osDistribution @13 :Text;
   osVersion @14 :Text;
   # Target variant overrides; empty means day10 detects from the host.
+
+  onlyPackages @15 :List(Text);
+  # --only-packages for the build/exec verbs: the project's local root packages
+  # to treat as buildable, rather than every .opam file in the checkout. Empty
+  # means all (day10's default). Used to pass ocaml-ci's per-variant compatible
+  # subset, so packages gated to a newer compiler are dropped instead of failing
+  # the whole solve (e.g. prometheus-eio on the 4.14 variant).
 }
 
 struct Secret {
