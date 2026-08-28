@@ -44,6 +44,7 @@ type day10_fields = {
   verb : string;
   opam_repository : string;
   opam_repository_commit : string;
+  opam_repository_base : string;
   ocaml_version : string;
   package : string;
   with_test : bool;
@@ -63,6 +64,7 @@ let day10_payload fields builder =
   B.verb_set d fields.verb;
   B.opam_repository_set d fields.opam_repository;
   B.opam_repository_commit_set d fields.opam_repository_commit;
+  B.opam_repository_base_set d fields.opam_repository_base;
   B.ocaml_version_set d fields.ocaml_version;
   B.package_set d fields.package;
   B.with_test_set d fields.with_test;
@@ -338,6 +340,15 @@ let day10_opam_repository_commit =
     ~doc:"opam-repository commit the job builds against (read from the mirror)."
     ~docv:"SHA" ["opam-repository-commit"]
 
+let day10_opam_repository_base =
+  Arg.value @@ Arg.opt Arg.string "" @@
+  Arg.info
+    ~doc:"Base opam-repository commit for a PR overlay (opam-repo-ci). When set, \
+          day10 reads both this and --opam-repository-commit (the PR head, which \
+          takes precedence). Leave empty for a single repo, or for a PR that \
+          deletes a package (pass only the head, whose tree already omits it)."
+    ~docv:"SHA" ["opam-repository-base"]
+
 let day10_ocaml_version =
   Arg.value @@ Arg.opt Arg.string "" @@
   Arg.info
@@ -384,12 +395,13 @@ let day10_os_version =
   Arg.info ~doc:"Target os-version (e.g. 24.04). Empty = host." ~docv:"VERSION" ["os-version"]
 
 let submit_day10_options =
-  let make verb opam_repository opam_repository_commit ocaml_version package with_test with_doc
+  let make verb opam_repository opam_repository_commit opam_repository_base ocaml_version package with_test with_doc
       dune_args arch os os_family os_distribution os_version =
     `Day10 {
       verb;
       opam_repository;
       opam_repository_commit;
+      opam_repository_base;
       ocaml_version;
       package;
       with_test;
@@ -404,6 +416,7 @@ let submit_day10_options =
   in
   Term.(const make
         $ day10_verb $ day10_opam_repository $ day10_opam_repository_commit
+        $ day10_opam_repository_base
         $ day10_ocaml_version $ day10_package $ day10_with_test $ day10_with_doc
         $ day10_dune_args $ day10_arch $ day10_os $ day10_os_family
         $ day10_os_distribution $ day10_os_version)

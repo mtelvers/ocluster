@@ -35,10 +35,12 @@ val ensure_opam_repository :
   switch:Lwt_switch.t ->
   log:Log_data.t ->
   url:string ->
-  commit:string ->
+  commits:string list ->
   (string, [`Cancelled | `Msg of string]) Lwt_result.t
-(** [ensure_opam_repository t ~switch ~log ~url ~commit] makes sure [commit] of
-    [url] is present in the local Git mirror, fetching it if necessary but
-    {e without} checking out a worktree, and returns the path to the mirror
-    repository. The result is suitable for [day10 --opam-repository <path>:<commit>],
-    which reads the commit directly from the Git object database. *)
+(** [ensure_opam_repository t ~switch ~log ~url ~commits] makes sure every
+    commit in [commits] of [url] is present in the local Git mirror, fetching
+    them if necessary but {e without} checking out a worktree, and returns the
+    path to the mirror repository. The result is suitable for
+    [day10 --opam-repository <path>:<commit>], which reads each commit directly
+    from the Git object database. Several commits let one fetch cover both sides
+    of a PR (base + head). *)

@@ -23,9 +23,11 @@ let read_payload (custom : Cluster_api.Custom.recv) : Cluster_api.Raw.Reader.Day
   Cluster_api.Raw.Reader.of_pointer (Cluster_api.Custom.payload custom)
 
 (** Build the argv for [day10 <verb>]. Empty Text fields are omitted so day10
-    falls back to its own defaults / host detection. [opam_repo] is the value
-    for [--opam-repository] (a [<mirror>:<commit>] spec). *)
-let day10_argv ~cache_dir ~opam_repo ~src d =
+    falls back to its own defaults / host detection. [opam_repos] is the list of
+    values for [--opam-repository] (each a [<mirror>:<commit>] spec), passed in
+    priority order: for a PR the head comes first so its package versions win
+    over the base in day10's first-source-wins overlay. *)
+let day10_argv ~cache_dir ~opam_repos ~src d =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let verb = R.verb_get d in
   let opt name v = match v with "" -> [] | v -> [ "--" ^ name; v ] in
@@ -58,7 +60,7 @@ let day10_argv ~cache_dir ~opam_repo ~src d =
   [ "day10"; verb ]
   @ cache_flag
   @ log_flag
-  @ [ "--opam-repository"; opam_repo ]
+  @ List.concat_map (fun r -> [ "--opam-repository"; r ]) opam_repos
   @ opt "ocaml-version" (R.ocaml_version_get d)
   @ opt "arch" (R.arch_get d)
   @ opt "os" (R.os_get d)
@@ -73,12 +75,14 @@ let day10_argv ~cache_dir ~opam_repo ~src d =
 let log_summary log d ~mirror ~cache_dir =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let pp_or_default = function "" -> "<default>" | v -> v in
+  let pp_base = function "" -> "<none>" | v -> Fmt.str "%s (PR overlay)" v in
   Log_data.write log
     (Fmt.str
        "day10 dispatch:\n\
        \  verb             : %s\n\
        \  opam-repository  : %s\n\
        \  opam-repo commit : %s\n\
+       \  opam-repo base   : %s\n\
        \  mirror           : %s\n\
        \  cache-dir        : %s\n\
        \  ocaml-version    : %s\n\
@@ -89,6 +93,7 @@ let log_summary log d ~mirror ~cache_dir =
        (R.verb_get d)
        (pp_or_default (R.opam_repository_get d))
        (R.opam_repository_commit_get d)
+       (pp_base (R.opam_repository_base_get d))
        mirror cache_dir
        (pp_or_default (R.ocaml_version_get d))
        (pp_or_default (R.package_get d))
@@ -101,24 +106,37 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let verb = R.verb_get d in
   let commit = R.opam_repository_commit_get d in
+  (* [base] is set for opam-repo-ci PRs whose head only adds or modifies
+     packages: [commit] is the PR head, [base] the branch point (master), and we
+     overlay them (head wins per package version) instead of merging — exact for
+     add/modify and needs no merge in the worker. A PR that *deletes* a package
+     must leave [base] empty: the head commit is a complete opam-repository tree
+     with the package already removed, so reading it alone reflects the deletion
+     (an overlay would wrongly re-add it from the base). The client decides. *)
+  let base = R.opam_repository_base_get d in
   let url = match R.opam_repository_get d with "" -> default_opam_repository | u -> u in
   match verb with
   | "solve" ->
     Lwt.return (Error (`Msg (Fmt.str "day10 verb %S is not yet implemented in the ocluster dispatch" verb)))
   | _ when commit = "" ->
     Lwt.return (Error (`Msg "day10 job requires opamRepositoryCommit"))
-  | _ when R.opam_repository_base_get d <> "" ->
-    Lwt.return (Error (`Msg "day10 PR-merge (opamRepositoryBase) is not yet implemented"))
   | "build" when src = "" ->
     Lwt.return (Error (`Msg "day10 build requires a source directory (set the job's repository/commits)"))
   | _ ->
     let ctx = Context.v ~state_dir in
-    Context.ensure_opam_repository ctx ~switch ~log ~url ~commit >>= function
+    (* Both commits come from the same [url] (opam-repo-ci fetches the PR head as
+       a pull ref of the opam-repository), so one fetch covers both. *)
+    let commits = if base = "" then [ commit ] else [ commit; base ] in
+    Context.ensure_opam_repository ctx ~switch ~log ~url ~commits >>= function
     | Error _ as e -> Lwt.return e
     | Ok mirror ->
       log_summary log d ~mirror ~cache_dir;
-      let opam_repo = Fmt.str "%s:%s" mirror commit in
-      let cmd = day10_argv ~cache_dir ~opam_repo ~src d in
+      (* Head first so its package versions take precedence over the base. *)
+      let opam_repos =
+        if base = "" then [ Fmt.str "%s:%s" mirror commit ]
+        else [ Fmt.str "%s:%s" mirror commit; Fmt.str "%s:%s" mirror base ]
+      in
+      let cmd = day10_argv ~cache_dir ~opam_repos ~src d in
       (* [day10 build] runs dune in [src] and writes _build there. The checkout
          is created by the worker (root-owned, per-job, ephemeral) but day10
          builds as its own container user, so make it writable first. Safe:
@@ -133,7 +151,7 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
       | Ok () ->
         Log_data.write log
           (Fmt.str "+ %s\n" (String.concat " " (List.map Filename.quote cmd)));
-        Log.info (fun f -> f "Dispatching day10 %s (opam-repo %s)" verb opam_repo);
+        Log.info (fun f -> f "Dispatching day10 %s (opam-repo %s)" verb (String.concat " " opam_repos));
         (* On cancel, send SIGTERM so day10 can tear down its runc container,
            overlay mount and temp dir; SIGKILL only if it hasn't exited after
            the grace period. *)

@@ -217,19 +217,22 @@ let with_build_context t ~log descr fn =
   build_context t ~log ~tmpdir descr >>!= fun () ->
   fn tmpdir
 
-let ensure_opam_repository t ~switch ~log ~url ~commit =
-  (* Make [commit] of [url] available in the shared Git mirror without checking
-     out a worktree, and return the mirror path. Unlike {!build_context} we do
-     not reset/clean/merge; day10 reads the commit straight from the object
-     database via [git archive], so many jobs at different commits can share one
-     mirror. *)
+let ensure_opam_repository t ~switch ~log ~url ~commits =
+  (* Make every commit in [commits] of [url] available in the shared Git mirror
+     without checking out a worktree, and return the mirror path. Unlike
+     {!build_context} we do not reset/clean/merge; day10 reads each commit
+     straight from the object database via [git archive], so many jobs at
+     different commits can share one mirror. Passing several commits lets a
+     single fetch cover both sides of a PR (base + head), which day10 then
+     overlays via repeated [--opam-repository]. *)
   let repository = repo t url in
   Lwt_mutex.with_lock repository.Repo.lock (fun () ->
       let local = Repo.local_copy repository in
-      Repo.has_commits repository [ Hash.of_hex commit ] >>!= function
+      Repo.has_commits repository (List.map Hash.of_hex commits) >>!= function
       | true -> Lwt_result.return local
       | false ->
-        Log_data.info log "Fetching opam-repository %s into mirror for commit %s" url commit;
+        Log_data.info log "Fetching opam-repository %s into mirror for commits %s"
+          url (String.concat ", " commits);
         Repo.fetch ~switch ~log repository >>!= fun () ->
         Lwt_result.return local)
 
