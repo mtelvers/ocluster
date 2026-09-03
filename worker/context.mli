@@ -44,3 +44,20 @@ val ensure_opam_repository :
     [day10 --opam-repository <path>:<commit>], which reads each commit directly
     from the Git object database. Several commits let one fetch cover both sides
     of a PR (base + head). *)
+
+val merge_tree :
+  t ->
+  switch:Lwt_switch.t ->
+  log:Log_data.t ->
+  url:string ->
+  base:string ->
+  head:string ->
+  (string * string, [`Cancelled | `Msg of string]) Lwt_result.t
+(** [merge_tree t ~switch ~log ~url ~base ~head] makes [base] and [head] of
+    [url] available in the mirror, performs a 3-way merge of [head] onto [base]
+    in the object database ({e without} a worktree, via [git merge-tree]), and
+    returns [(mirror, tree)] where [tree] is the OID of the merged tree —
+    suitable for [day10 --opam-repository <mirror>:<tree>]. Fails if the two do
+    not merge cleanly (opam-repo-ci rejects such PRs upstream, so in practice
+    this does not happen). Used for opam-repo-ci PRs: [base] = master,
+    [head] = PR head. *)

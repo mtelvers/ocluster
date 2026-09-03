@@ -24,9 +24,8 @@ let read_payload (custom : Cluster_api.Custom.recv) : Cluster_api.Raw.Reader.Day
 
 (** Build the argv for [day10 <verb>]. Empty Text fields are omitted so day10
     falls back to its own defaults / host detection. [opam_repos] is the list of
-    values for [--opam-repository] (each a [<mirror>:<commit>] spec), passed in
-    priority order: for a PR the head comes first so its package versions win
-    over the base in day10's first-source-wins overlay. *)
+    [--opam-repository] specs (each a [<mirror>:<rev>]); today it is a single
+    entry — a plain commit, or the merged-PR tree. *)
 let day10_argv ~cache_dir ~opam_repos ~src d =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let verb = R.verb_get d in
@@ -75,7 +74,7 @@ let day10_argv ~cache_dir ~opam_repos ~src d =
 let log_summary log d ~mirror ~cache_dir =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let pp_or_default = function "" -> "<default>" | v -> v in
-  let pp_base = function "" -> "<none>" | v -> Fmt.str "%s (PR overlay)" v in
+  let pp_base = function "" -> "<none>" | v -> Fmt.str "%s (merged with head)" v in
   Log_data.write log
     (Fmt.str
        "day10 dispatch:\n\
@@ -106,13 +105,11 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
   let module R = Cluster_api.Raw.Reader.Day10 in
   let verb = R.verb_get d in
   let commit = R.opam_repository_commit_get d in
-  (* [base] is set for opam-repo-ci PRs whose head only adds or modifies
-     packages: [commit] is the PR head, [base] the branch point (master), and we
-     overlay them (head wins per package version) instead of merging — exact for
-     add/modify and needs no merge in the worker. A PR that *deletes* a package
-     must leave [base] empty: the head commit is a complete opam-repository tree
-     with the package already removed, so reading it alone reflects the deletion
-     (an overlay would wrongly re-add it from the base). The client decides. *)
+  (* [base] is set for opam-repo-ci PRs: [commit] is the PR head, [base] the
+     current master. The dispatch 3-way merges head onto base in the object
+     database and day10 reads the single merged tree — exactly what the OBuilder
+     path does with [git merge]. Empty [base] = a single commit read directly
+     (ocaml-ci projects, opam-health-check snapshots). *)
   let base = R.opam_repository_base_get d in
   let url = match R.opam_repository_get d with "" -> default_opam_repository | u -> u in
   match verb with
@@ -124,18 +121,19 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
     Lwt.return (Error (`Msg "day10 build requires a source directory (set the job's repository/commits)"))
   | _ ->
     let ctx = Context.v ~state_dir in
-    (* Both commits come from the same [url] (opam-repo-ci fetches the PR head as
-       a pull ref of the opam-repository), so one fetch covers both. *)
-    let commits = if base = "" then [ commit ] else [ commit; base ] in
-    Context.ensure_opam_repository ctx ~switch ~log ~url ~commits >>= function
+    (* base set -> 3-way merge the PR head onto master in the object DB, yielding
+       one merged tree; base empty -> read the single commit directly. Both come
+       from the same [url] (the PR head is a pull ref of the opam-repository). *)
+    (if base = "" then
+       Context.ensure_opam_repository ctx ~switch ~log ~url ~commits:[ commit ]
+       |> Lwt_result.map (fun mirror -> (mirror, commit))
+     else
+       Context.merge_tree ctx ~switch ~log ~url ~base ~head:commit)
+    >>= function
     | Error _ as e -> Lwt.return e
-    | Ok mirror ->
+    | Ok (mirror, rev) ->
       log_summary log d ~mirror ~cache_dir;
-      (* Head first so its package versions take precedence over the base. *)
-      let opam_repos =
-        if base = "" then [ Fmt.str "%s:%s" mirror commit ]
-        else [ Fmt.str "%s:%s" mirror commit; Fmt.str "%s:%s" mirror base ]
-      in
+      let opam_repos = [ Fmt.str "%s:%s" mirror rev ] in
       let cmd = day10_argv ~cache_dir ~opam_repos ~src d in
       (* [day10 build] runs dune in [src] and writes _build there. The checkout
          is created by the worker (root-owned, per-job, ephemeral) but day10

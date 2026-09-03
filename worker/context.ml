@@ -236,6 +236,32 @@ let ensure_opam_repository t ~switch ~log ~url ~commits =
         Repo.fetch ~switch ~log repository >>!= fun () ->
         Lwt_result.return local)
 
+let capture_stdout cmd =
+  let proc = Lwt_process.open_process_in ("", Array.of_list cmd) in
+  Lwt_io.read proc#stdout >>= fun out ->
+  proc#close >|= fun status -> (status, out)
+
+let first_line s =
+  match String.index_opt s '\n' with
+  | Some i -> String.sub s 0 i
+  | None -> String.trim s
+
+let merge_tree t ~switch ~log ~url ~base ~head =
+  (* opam-repo-ci PR: 3-way merge [head] (the PR) onto [base] (master) in the
+     object database — no worktree, no 30k-file checkout — and return the OID of
+     the merged tree, which day10 reads via [git archive]. A conflict cannot
+     occur in practice: opam-repo-ci rejects un-mergeable PRs during analysis, so
+     a build job's base+head always merge cleanly. *)
+  ensure_opam_repository t ~switch ~log ~url ~commits:[ head; base ] >>!= fun mirror ->
+  Log_data.info log "day10: merging PR head %s onto master %s (merge-tree)" head base;
+  capture_stdout [ "git"; "-C"; mirror; "merge-tree"; "--write-tree"; base; head ]
+  >>= fun (status, out) ->
+  match status with
+  | Unix.WEXITED 0 -> Lwt_result.return (mirror, first_line out)
+  | Unix.WEXITED 1 ->
+    Lwt_result.fail (`Msg (Fmt.str "day10: PR head %s does not merge cleanly onto master %s" head base))
+  | _ -> Lwt_result.fail (`Msg "day10: git merge-tree failed")
+
 let v ~state_dir =
   ensure_dir state_dir;
   let t = { state_dir } in
