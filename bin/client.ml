@@ -55,6 +55,8 @@ type day10_fields = {
   os_family : string;
   os_distribution : string;
   os_version : string;
+  lower_bound : bool;
+  update_invariant : bool;
 }
 
 (* Build a Custom job payload for kind="day10". *)
@@ -74,7 +76,9 @@ let day10_payload fields builder =
   B.os_set d fields.os;
   B.os_family_set d fields.os_family;
   B.os_distribution_set d fields.os_distribution;
-  B.os_version_set d fields.os_version
+  B.os_version_set d fields.os_version;
+  B.lower_bound_set d fields.lower_bound;
+  B.update_invariant_set d fields.update_invariant
 
 let get_action = function
   | `Docker (dockerfile, push_to, options) ->
@@ -394,9 +398,17 @@ let day10_os_version =
   Arg.value @@ Arg.opt Arg.string "" @@
   Arg.info ~doc:"Target os-version (e.g. 24.04). Empty = host." ~docv:"VERSION" ["os-version"]
 
+let day10_lower_bound =
+  Arg.value @@ Arg.flag @@
+  Arg.info ~doc:"Pass --prefer-oldest to day10 (lower-bounds test)." ["lower-bound"]
+
+let day10_update_invariant =
+  Arg.value @@ Arg.flag @@
+  Arg.info ~doc:"Pass --update-invariant to day10 (for a compiler-package target)." ["update-invariant"]
+
 let submit_day10_options =
   let make verb opam_repository opam_repository_commit opam_repository_base ocaml_version package with_test with_doc
-      dune_args arch os os_family os_distribution os_version =
+      dune_args arch os os_family os_distribution os_version lower_bound update_invariant =
     `Day10 {
       verb;
       opam_repository;
@@ -412,6 +424,8 @@ let submit_day10_options =
       os_family;
       os_distribution;
       os_version;
+      lower_bound;
+      update_invariant;
     }
   in
   Term.(const make
@@ -419,7 +433,8 @@ let submit_day10_options =
         $ day10_opam_repository_base
         $ day10_ocaml_version $ day10_package $ day10_with_test $ day10_with_doc
         $ day10_dune_args $ day10_arch $ day10_os $ day10_os_family
-        $ day10_os_distribution $ day10_os_version)
+        $ day10_os_distribution $ day10_os_version $ day10_lower_bound
+        $ day10_update_invariant)
 
 let submit_day10 =
   let doc = "Submit a day10 job to the scheduler." in

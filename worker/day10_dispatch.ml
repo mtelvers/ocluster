@@ -39,6 +39,11 @@ let day10_argv ~cache_dir ~opam_repos ~src d =
   (* --with-test: build + health-check; --with-doc: build only. *)
   let test_flag = match verb with "build" | "health-check" -> flag "with-test" (R.with_test_get d) | _ -> [] in
   let doc_flag = match verb with "build" -> flag "with-doc" (R.with_doc_get d) | _ -> [] in
+  (* --prefer-oldest is day10's lower-bounds mode (opam-repo-ci's lowerBound);
+     --update-invariant lets the solver change the compiler for a compiler-package
+     target. Both apply to the build and health-check verbs. *)
+  let prefer_oldest_flag = match verb with "build" | "health-check" -> flag "prefer-oldest" (R.lower_bound_get d) | _ -> [] in
+  let update_invariant_flag = match verb with "build" | "health-check" -> flag "update-invariant" (R.update_invariant_get d) | _ -> [] in
   (* --only-packages (build/exec only) restricts which of the project's .opam
      files count as local roots. Empty = all (day10's default). Repeatable. *)
   let only_packages_flags =
@@ -68,6 +73,8 @@ let day10_argv ~cache_dir ~opam_repos ~src d =
   @ opt "os-version" (R.os_version_get d)
   @ test_flag
   @ doc_flag
+  @ prefer_oldest_flag
+  @ update_invariant_flag
   @ only_packages_flags
   @ positional
 
