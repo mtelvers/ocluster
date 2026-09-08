@@ -95,7 +95,9 @@ let log_summary log d ~mirror ~cache_dir =
        \  package          : %s\n\
        \  os-distribution  : %s\n\
        \  os-version       : %s\n\
-       \  with-test        : %b\n"
+       \  with-test        : %b\n\
+       \  lower-bound      : %b\n\
+       \  update-invariant : %b\n"
        (R.verb_get d)
        (pp_or_default (R.opam_repository_get d))
        (R.opam_repository_commit_get d)
@@ -105,7 +107,9 @@ let log_summary log d ~mirror ~cache_dir =
        (pp_or_default (R.package_get d))
        (pp_or_default (R.os_distribution_get d))
        (pp_or_default (R.os_version_get d))
-       (R.with_test_get d))
+       (R.with_test_get d)
+       (R.lower_bound_get d)
+       (R.update_invariant_get d))
 
 let run ~cache_dir ~state_dir ~switch ~log ~src custom =
   let d = read_payload custom in
