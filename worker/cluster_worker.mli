@@ -14,7 +14,7 @@ type build =
   job_spec ->
   (string, [`Cancelled | `Msg of string]) Lwt_result.t
 
-val default_build : ?obuilder:Obuilder_build.t -> ?day10_cache:string -> state_dir:string -> build
+val default_build : ?obuilder:Obuilder_build.t -> ?day10:Day10.t -> state_dir:string -> build
 (** The default build that is used if no [build] argument is given to {! run}.
     @param day10_cache When set, enables [Custom] jobs of kind ["day10"] and is
       used as day10's build-cache directory (passed as [--cache-dir]). When
@@ -24,6 +24,8 @@ val run :
   ?switch:Lwt_switch.t ->
   ?build:build ->
   ?day10_cache:string ->
+  ?day10_prune_threshold:float ->
+  ?day10_cache_max_size:string ->
   ?allow_push:string list ->
   ?healthcheck_period:float ->
   ?prune_threshold:float ->
@@ -45,6 +47,11 @@ val run :
       specifications).
     @param day10_cache When set, enables [Custom] jobs of kind ["day10"] and is used as
       day10's build-cache directory. When unset, day10 jobs are rejected.
+    @param day10_prune_threshold When set (and [day10_cache] is set), a background loop runs
+      [day10 prune] whenever the day10 cache partition's free space falls below this percentage
+      (0 to 100). Prunes only gate new day10 builds, not the whole worker.
+    @param day10_cache_max_size Target size for [day10 prune --max-size] (e.g. ["40G"]) used by
+      the day10 prune loop; when unset the prune keeps the newest 90% by size.
     @param allow_push Docker repositories to which results can be pushed.
     @param healthcheck_period Time period, in seconds, at which the health of the worker is checked.
     @param prune_threshold Stop and run [docker system prune -af] if free-space is less than this

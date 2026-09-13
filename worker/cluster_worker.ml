@@ -391,7 +391,7 @@ let try_unlink file =
   if Sys.file_exists file then Lwt_unix.unlink file
   else Lwt.return_unit
 
-let default_build ?obuilder ?day10_cache ~state_dir ~switch ~log ~src ~secrets = function
+let default_build ?obuilder ?day10 ~state_dir ~switch ~log ~src ~secrets = function
   | `Docker (dockerfile, options) ->
     let iid_file = Filename.temp_file "build-worker-" ".iid" in
     Lwt_list.map_p (fun (id, value) -> create_secret_file value >|= fun fname -> id, fname) secrets >>= fun secret_files ->
@@ -433,8 +433,8 @@ let default_build ?obuilder ?day10_cache ~state_dir ~switch ~log ~src ~secrets =
   | `Custom c ->
     begin match Cluster_api.Custom.kind c with
     | "day10" ->
-      begin match day10_cache with
-      | Some cache_dir -> Day10_dispatch.run ~cache_dir ~state_dir ~switch ~log ~src c
+      begin match day10 with
+      | Some mgr -> Day10.run mgr ~state_dir ~switch ~log ~src c
       | None ->
         Log.warn (fun f -> f "Received a \"day10\" job but this worker has no --day10-cache configured");
         Lwt.return @@ Error (`Msg "day10 jobs are not enabled on this worker (set --day10-cache)")
@@ -504,21 +504,31 @@ let self_update ~update t =
        Lwt_result.fail (`Msg (Printexc.to_string ex))
     )
 
-let run ?switch ?build ?day10_cache ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_threshold ?docker_max_df_size ?(obuilder_prune_threshold = 30.0) ?(obuilder_prune_limit = 100) ?obuilder ?(additional_metrics=[]) ~update ~capacity ~name ~state_dir registration_service =
+let run ?switch ?build ?day10_cache ?day10_prune_threshold ?day10_cache_max_size ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_threshold ?docker_max_df_size ?(obuilder_prune_threshold = 30.0) ?(obuilder_prune_limit = 100) ?obuilder ?(additional_metrics=[]) ~update ~capacity ~name ~state_dir registration_service =
   begin match prune_threshold, docker_max_df_size with
     | None, None -> Log.info (fun f -> f "Prune threshold not set and docker max df size is not. Will not check for low disk-space!")
     | None, Some size -> Log.info (fun f -> f "Pruning docker whenever the memory used exceeds %3.2fGB" size)
     | Some frac, _ when frac < 0.0 || frac > 100.0 -> Fmt.invalid_arg "prune_threshold must be in the range 0 to 100"
     | Some _, _ -> ()
   end;
+  begin match day10_prune_threshold with
+    | Some frac when frac < 0.0 || frac > 100.0 -> Fmt.invalid_arg "day10_prune_threshold must be in the range 0 to 100"
+    | Some _ when day10_cache = None -> Log.warn (fun f -> f "--day10-prune-threshold set but --day10-cache is not; day10 pruning disabled")
+    | _ -> ()
+  end;
   begin match obuilder with
     | None -> Lwt.return_none
     | Some config -> Obuilder_build.create ~prune_threshold:obuilder_prune_threshold ~prune_limit:obuilder_prune_limit config >|= Option.some
   end >>= fun obuilder ->
+  let day10 =
+    Option.map
+      (fun cache_dir -> Day10.create ?prune_threshold:day10_prune_threshold ?max_size:day10_cache_max_size cache_dir)
+      day10_cache
+  in
   let build =
     match build with
     | Some x -> x
-    | None -> default_build ?obuilder ?day10_cache ~state_dir
+    | None -> default_build ?obuilder ?day10 ~state_dir
   in
   let t = {
     name;

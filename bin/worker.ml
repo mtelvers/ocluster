@@ -45,7 +45,7 @@ let update_docker () =
 let update_normal () =
   Lwt.return (fun () -> Lwt.return_unit)
 
-let main ?style_renderer level ?formatter registration_path capacity name allow_push healthcheck_period prune_threshold docker_max_df_size obuilder_prune_threshold obuilder_prune_limit state_dir obuilder additional_metrics day10_cache =
+let main ?style_renderer level ?formatter registration_path capacity name allow_push healthcheck_period prune_threshold docker_max_df_size obuilder_prune_threshold obuilder_prune_limit state_dir obuilder additional_metrics day10_cache day10_prune_threshold day10_cache_max_size =
   setup_log ?style_renderer ?formatter level;
   let update =
     if Sys.file_exists "/.dockerenv" then update_docker
@@ -57,16 +57,16 @@ let main ?style_renderer level ?formatter registration_path capacity name allow_
   Lwt_main.run begin
     let vat = Capnp_rpc_unix.client_only_vat () in
     let sr = Capnp_rpc_unix.Cap_file.load vat registration_path |> or_die in
-    Cluster_worker.run ~capacity ~name ~allow_push ~healthcheck_period ?prune_threshold ?docker_max_df_size ~obuilder_prune_threshold ~obuilder_prune_limit ?obuilder ~additional_metrics ~state_dir ?day10_cache ~update sr
+    Cluster_worker.run ~capacity ~name ~allow_push ~healthcheck_period ?prune_threshold ?docker_max_df_size ~obuilder_prune_threshold ~obuilder_prune_limit ?obuilder ~additional_metrics ~state_dir ?day10_cache ?day10_prune_threshold ?day10_cache_max_size ~update sr
   end
 
 (* Command-line parsing *)
-let main ~install (style_renderer, args1) (level, args2) ((registration_path, capacity, name, allow_push, healthcheck_period, prune_threshold, docker_max_df_size, obuilder_prune_threshold, obuilder_prune_limit, state_dir, obuilder, additional_metrics, day10_cache), args3) =
+let main ~install (style_renderer, args1) (level, args2) ((registration_path, capacity, name, allow_push, healthcheck_period, prune_threshold, docker_max_df_size, obuilder_prune_threshold, obuilder_prune_limit, state_dir, obuilder, additional_metrics, day10_cache, day10_prune_threshold, day10_cache_max_size), args3) =
   if install then
     Ok (Winsvc_wrapper.install name "OCluster Worker" "Run a build worker" (args1 @ args2 @ args3))
   else
     Ok (Winsvc_wrapper.run name state_dir (fun ?formatter () ->
-      main ?style_renderer level ?formatter registration_path capacity name allow_push healthcheck_period prune_threshold docker_max_df_size obuilder_prune_threshold obuilder_prune_limit state_dir obuilder additional_metrics day10_cache))
+      main ?style_renderer level ?formatter registration_path capacity name allow_push healthcheck_period prune_threshold docker_max_df_size obuilder_prune_threshold obuilder_prune_limit state_dir obuilder additional_metrics day10_cache day10_prune_threshold day10_cache_max_size))
 
 
 open Cmdliner
@@ -224,12 +224,32 @@ let day10_cache =
     ~docv:"DIR"
     ["day10-cache"]
 
+let day10_prune_threshold =
+  Arg.value @@
+  Arg.opt Arg.(some float) None @@
+  Arg.info
+    ~doc:"If using day10, prune the day10 cache (see $(b,--day10-cache)) whenever its \
+          partition's free space falls below this (0-100). Pruning gates only new day10 \
+          builds, not the whole worker."
+    ~docv:"PERCENTAGE"
+    ["day10-prune-threshold"]
+
+let day10_cache_max_size =
+  Arg.value @@
+  Arg.opt Arg.(some string) None @@
+  Arg.info
+    ~doc:"Target size the day10 prune keeps the cache within (passed to $(b,day10 prune) as \
+          $(b,--max-size), e.g. $(b,40G) or $(b,500M)). day10 evicts least-recently-used \
+          entries to fit. When omitted, the prune keeps the newest 90% by size instead."
+    ~docv:"SIZE"
+    ["day10-cache-max-size"]
+
 let worker_opts_t =
-  let worker_opts registration_path capacity name allow_push healthcheck_period prune_threshold docker_max_df_size obuilder_prune_threshold obuilder_prune_limit state_dir obuilder additional_metrics day10_cache =
-    (registration_path, capacity, name, allow_push, healthcheck_period, prune_threshold, docker_max_df_size, obuilder_prune_threshold, obuilder_prune_limit, state_dir, obuilder, additional_metrics, day10_cache) in
+  let worker_opts registration_path capacity name allow_push healthcheck_period prune_threshold docker_max_df_size obuilder_prune_threshold obuilder_prune_limit state_dir obuilder additional_metrics day10_cache day10_prune_threshold day10_cache_max_size =
+    (registration_path, capacity, name, allow_push, healthcheck_period, prune_threshold, docker_max_df_size, obuilder_prune_threshold, obuilder_prune_limit, state_dir, obuilder, additional_metrics, day10_cache, day10_prune_threshold, day10_cache_max_size) in
   Term.(with_used_args
     (const worker_opts $ connect_addr $ capacity $ worker_name $ allow_push $ healthcheck_period
-     $ prune_threshold $ docker_max_df_size $ obuilder_prune_threshold $ obuilder_prune_limit $ state_dir $ Obuilder_config.v $ additional_metrics $ day10_cache))
+     $ prune_threshold $ docker_max_df_size $ obuilder_prune_threshold $ obuilder_prune_limit $ state_dir $ Obuilder_config.v $ additional_metrics $ day10_cache $ day10_prune_threshold $ day10_cache_max_size))
 
 let cmd ~install =
   let doc = "Run a build worker" in

@@ -43,3 +43,7 @@ let obuilder_space_free =
   let help = "OBuilder percentage of space free" in
   Gauge.v ~help ~namespace ~subsystem "obuilder_space_free"
 
+let day10_space_free =
+  let help = "day10 cache partition percentage of space free" in
+  Gauge.v ~help ~namespace ~subsystem "day10_space_free"
+
