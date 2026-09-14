@@ -222,6 +222,7 @@ let day10_cache =
           omitted, day10 jobs are rejected. This should be a large, persistent \
           directory, separate from $(b,--state-dir)/$(b,--obuilder-store)."
     ~docv:"DIR"
+    ~docs:"DAY10"
     ["day10-cache"]
 
 let day10_prune_threshold =
@@ -232,6 +233,7 @@ let day10_prune_threshold =
           partition's free space falls below this (0-100). Pruning gates only new day10 \
           builds, not the whole worker."
     ~docv:"PERCENTAGE"
+    ~docs:"DAY10"
     ["day10-prune-threshold"]
 
 let day10_cache_max_size =
@@ -242,6 +244,7 @@ let day10_cache_max_size =
           $(b,--max-size), e.g. $(b,40G) or $(b,500M)). day10 evicts least-recently-used \
           entries to fit. When omitted, the prune keeps the newest 90% by size instead."
     ~docv:"SIZE"
+    ~docs:"DAY10"
     ["day10-cache-max-size"]
 
 let worker_opts_t =
@@ -257,7 +260,11 @@ let cmd ~install =
     `P "On $(b,Windows), specify '$(b,install)' as the first \
         command-line parameter to install the worker as a Windows \
         service with the specified parameters, and '$(b,remove) \
-        $(i,name)' to remove the worker $(i,name) from the services." ] in
+        $(i,name)' to remove the worker $(i,name) from the services.";
+    `S "DAY10";
+    `P "Support for $(b,day10) custom jobs and its build cache. Set \
+        $(b,--day10-cache) to enable day10 jobs; the remaining options bound the \
+        cache's disk use." ] in
   let info = Cmd.info "ocluster-worker" ~doc ~man ~version:Version.t in
   let docs = Manpage.s_common_options in
   Cmd.v info
