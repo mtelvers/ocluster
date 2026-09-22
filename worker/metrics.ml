@@ -47,3 +47,7 @@ let day10_space_free =
   let help = "day10 cache partition percentage of space free" in
   Gauge.v ~help ~namespace ~subsystem "day10_space_free"
 
+let day10_refresh_time =
+  let help = "Time spent refreshing day10 base images" in
+  Summary.v ~help ~namespace ~subsystem "day10_refresh_time_seconds"
+

@@ -44,6 +44,10 @@ type t = {
   healthcheck_period : float;          (* Number of second between obuilder health checks *)
   prune_threshold : float option;      (* docker-prune when free space is lower than this (percentage) *)
   docker_max_df_size : float option;   (* docker-prune if [prune_threshold] is [None] and used space greater than this (GBs) *)
+  day10_cache : string option;         (* day10 cache dir, for scheduled base-image refresh *)
+  day10_refresh_period : float option; (* seconds between [day10 refresh-base] runs; [None] disables the schedule *)
+  day10_refresh_max_age : int option;  (* [day10 refresh-base --max-age HOURS]; skip platforms refreshed more recently *)
+  mutable day10_last_refresh : float;  (* Unix time of the last refresh attempt (0 = never, so the first idle window refreshes) *)
   registration_service : Cluster_api.Raw.Client.Registration.t Sturdy_ref.t;
   capacity : int;
   mutable in_use : int;                (* Number of active builds *)
@@ -239,6 +243,43 @@ let rec maybe_prune t queue =
       Unix.sleep (60 * 60);
       maybe_prune t queue
 
+(* Scheduled day10 base-image refresh. When day10 is enabled with a refresh
+   period, once that period has elapsed the worker pauses — deactivating the
+   queue and draining in-flight jobs, exactly as [maybe_prune] does — then runs
+   [day10 refresh-base] with nothing else building, and resumes. [refresh-base]
+   requires an idle machine because it writes into bases that every build reads.
+   [--max-age] keeps it cheap: platforms refreshed within that window are left
+   alone, so it is safe to call on every idle window and a no-op after a restart
+   (the [last_refresh] timestamp is in-memory only, so a restart re-triggers). *)
+let maybe_refresh_base t queue =
+  match t.day10_cache, t.day10_refresh_period with
+  | Some dir, Some period when Unix.gettimeofday () -. t.day10_last_refresh >= period ->
+    Log.info (fun f -> f "day10 base refresh due. Will finish current jobs and then refresh.");
+    Cluster_api.Queue.set_active queue false >>= fun () ->
+    let rec drain () =
+      if t.in_use = 0 then Lwt.return_unit
+      else Lwt_condition.wait t.cond >>= drain
+    in
+    drain () >>= fun () ->
+    Log.info (fun f -> f "All jobs finished. Refreshing day10 base images…");
+    let max_age = match t.day10_refresh_max_age with
+      | Some h -> [ "--max-age"; string_of_int h ]
+      | None -> []
+    in
+    let argv = Array.of_list ([ "day10"; "refresh-base"; "--cache-dir"; dir; "--log" ] @ max_age) in
+    Prometheus_lwt.Summary.observe_time Metrics.day10_refresh_time
+      (fun () -> Lwt_process.exec ("", argv))
+    >>= fun status ->
+    (match status with
+     | Unix.WEXITED 0 -> Log.info (fun f -> f "day10 base refresh complete.")
+     | Unix.WEXITED n -> Log.warn (fun f -> f "day10 refresh-base exited with code %d" n)
+     | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Log.warn (fun f -> f "day10 refresh-base was killed by a signal"));
+    (* Record the attempt even on failure, so a broken refresh retries after the
+       period rather than on every loop iteration. *)
+    t.day10_last_refresh <- Unix.gettimeofday ();
+    Cluster_api.Queue.set_active queue true
+  | _ -> Lwt.return_unit
+
 let healthcheck obuilder =
   let t0 = Unix.gettimeofday () in
   Obuilder_build.healthcheck obuilder >|= fun r ->
@@ -290,6 +331,7 @@ let loop ~switch ?obuilder t queue =
         Lwt_condition.wait t.cond >>= loop
       ) else (
         maybe_prune t queue >>= fun () ->
+        maybe_refresh_base t queue >>= fun () ->
         check_health t ~last_healthcheck ~queue obuilder >>= fun () ->
         let outcome, set_outcome = Lwt.wait () in
         let log = Log_data.create () in
@@ -504,7 +546,7 @@ let self_update ~update t =
        Lwt_result.fail (`Msg (Printexc.to_string ex))
     )
 
-let run ?switch ?build ?day10_cache ?day10_prune_threshold ?day10_cache_max_size ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_threshold ?docker_max_df_size ?(obuilder_prune_threshold = 30.0) ?(obuilder_prune_limit = 100) ?obuilder ?(additional_metrics=[]) ~update ~capacity ~name ~state_dir registration_service =
+let run ?switch ?build ?day10_cache ?day10_prune_threshold ?day10_cache_max_size ?day10_refresh_period ?day10_refresh_max_age ?(allow_push=[]) ?(healthcheck_period = 600.0) ?prune_threshold ?docker_max_df_size ?(obuilder_prune_threshold = 30.0) ?(obuilder_prune_limit = 100) ?obuilder ?(additional_metrics=[]) ~update ~capacity ~name ~state_dir registration_service =
   begin match prune_threshold, docker_max_df_size with
     | None, None -> Log.info (fun f -> f "Prune threshold not set and docker max df size is not. Will not check for low disk-space!")
     | None, Some size -> Log.info (fun f -> f "Pruning docker whenever the memory used exceeds %3.2fGB" size)
@@ -514,6 +556,11 @@ let run ?switch ?build ?day10_cache ?day10_prune_threshold ?day10_cache_max_size
   begin match day10_prune_threshold with
     | Some frac when frac < 0.0 || frac > 100.0 -> Fmt.invalid_arg "day10_prune_threshold must be in the range 0 to 100"
     | Some _ when day10_cache = None -> Log.warn (fun f -> f "--day10-prune-threshold set but --day10-cache is not; day10 pruning disabled")
+    | _ -> ()
+  end;
+  begin match day10_refresh_period with
+    | Some h when h <= 0.0 -> Fmt.invalid_arg "day10_refresh_period must be greater than 0"
+    | Some _ when day10_cache = None -> Log.warn (fun f -> f "--day10-refresh-base-period set but --day10-cache is not; day10 base refresh disabled")
     | _ -> ()
   end;
   begin match obuilder with
@@ -536,6 +583,10 @@ let run ?switch ?build ?day10_cache ?day10_prune_threshold ?day10_cache_max_size
     healthcheck_period;
     prune_threshold;
     docker_max_df_size;
+    day10_cache;
+    day10_refresh_period = Option.map (fun hours -> hours *. 3600.) day10_refresh_period;
+    day10_refresh_max_age;
+    day10_last_refresh = 0.0;
     registration_service;
     build;
     cond = Lwt_condition.create ();
