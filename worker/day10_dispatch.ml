@@ -31,8 +31,9 @@ let day10_argv ~cache_dir ~opam_repos ~src d =
   let verb = R.verb_get d in
   let opt name v = match v with "" -> [] | v -> [ "--" ^ name; v ] in
   let flag name b = if b then [ "--" ^ name ] else [] in
-  (* [list] does not accept --cache-dir; every other verb requires it. *)
-  let cache_flag = match verb with "list" -> [] | _ -> [ "--cache-dir"; cache_dir ] in
+  (* [list] and [revdeps] only solve — they do not touch the build cache and so
+     reject --cache-dir; every other verb requires it. *)
+  let cache_flag = match verb with "list" | "revdeps" -> [] | _ -> [ "--cache-dir"; cache_dir ] in
   (* --log makes day10 emit the full build log (and terminal marker) so the
      client can show why a build failed. Accepted by build and health-check. *)
   let log_flag = match verb with "build" | "health-check" -> [ "--log" ] | _ -> [] in
