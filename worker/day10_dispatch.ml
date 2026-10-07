@@ -162,12 +162,20 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
         Log_data.write log
           (Fmt.str "+ %s\n" (String.concat " " (List.map Filename.quote cmd)));
         Log.info (fun f -> f "Dispatching day10 %s (opam-repo %s)" verb (String.concat " " opam_repos));
+        (* [revdeps] streams its package list to stdout; bracket it with @@@OUTPUT
+           markers (as the OBuilder List_revdeps spec does) so the client can cut
+           the list out of the log. day10's own warnings may interleave inside the
+           markers, so the client parses the region tolerantly. *)
+        let markers = String.equal verb "revdeps" in
+        if markers then Log_data.write log "@@@OUTPUT\n";
         (* On cancel, send SIGTERM so day10 can tear down its runc container,
            overlay mount and temp dir; SIGKILL only if it hasn't exited after
            the grace period. *)
         Process.check_call ~label:"day10" ~switch ~log
           ~on_cancel:(`Terminate_then_kill 60.) cmd
         >|= function
-        | Ok () -> Ok (Fmt.str "day10 %s succeeded" verb)
+        | Ok () ->
+          if markers then Log_data.write log "\n@@@OUTPUT\n";
+          Ok (Fmt.str "day10 %s succeeded" verb)
         | Error `Cancelled as e -> e
         | Error (`Msg _) as e -> e)
