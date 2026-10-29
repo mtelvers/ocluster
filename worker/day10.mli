@@ -22,8 +22,16 @@ type t
     automatic pruning is disabled and the manager only dispatches jobs. *)
 val create : ?prune_threshold:float -> ?max_size:string -> string -> t
 
+(** [rebase t ~days] runs [day10 prune --base --days N], which deletes the base
+    images built more than [days] days ago together with the layers that
+    installed system packages on them, so that the next build on each platform
+    makes a fresh base from the current package index. New builds wait until it
+    has finished, as they do for a prune; the caller sees to it that none is in
+    flight when it starts. *)
+val rebase : t -> days:int -> unit Lwt.t
+
 (** [run t ~state_dir ~switch ~log ~src custom] waits for any in-progress prune
-    to finish, then dispatches the day10 [Custom] job. *)
+    or base replacement to finish, then dispatches the day10 [Custom] job. *)
 val run :
   t ->
   state_dir:string ->

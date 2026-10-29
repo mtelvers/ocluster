@@ -26,8 +26,8 @@ val run :
   ?day10_cache:string ->
   ?day10_prune_threshold:float ->
   ?day10_cache_max_size:string ->
-  ?day10_refresh_period:float ->
-  ?day10_refresh_max_age:int ->
+  ?day10_rebase_period:float ->
+  ?day10_rebase_days:int ->
   ?allow_push:string list ->
   ?healthcheck_period:float ->
   ?prune_threshold:float ->
@@ -54,12 +54,15 @@ val run :
       (0 to 100). Prunes only gate new day10 builds, not the whole worker.
     @param day10_cache_max_size Target size for [day10 prune --max-size] (e.g. ["40G"]) used by
       the day10 prune loop; when unset the prune keeps the newest 90% by size.
-    @param day10_refresh_period When set (and [day10_cache] is set), the worker periodically pauses
-      (drains in-flight jobs, like the prune path) and runs [day10 refresh-base] to bring the cached
-      base images' package indexes up to date. The value is the schedule interval in hours.
-    @param day10_refresh_max_age Passed to [day10 refresh-base --max-age HOURS]: a platform refreshed
-      within that window is left alone. Makes the scheduled refresh a cheap no-op after a worker
-      restart. When unset, every scheduled run refreshes every platform.
+    @param day10_rebase_period When set (and [day10_cache] is set), the worker periodically runs
+      [day10 prune --base --days N], which deletes the cached base images older than N days
+      together with the layers that installed system packages on them; the next build makes a
+      fresh base from the current package index. The value is the schedule interval in hours.
+      It runs only when no build is in flight, and is otherwise retried an hour later; a job
+      that arrives while it runs waits for it to finish, which is seconds. The queue is never
+      paused for it.
+    @param day10_rebase_days The N above, 7 by default: a base built more recently is left alone,
+      so each run replaces only what has aged.
     @param allow_push Docker repositories to which results can be pushed.
     @param healthcheck_period Time period, in seconds, at which the health of the worker is checked.
     @param prune_threshold Stop and run [docker system prune -af] if free-space is less than this
