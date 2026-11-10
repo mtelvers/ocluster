@@ -16,12 +16,33 @@ let send_to ch contents =
     (fun ex -> Lwt.return (Fmt.error_msg "%a" Fmt.exn ex))
 
 (* How to stop the child when the job is cancelled.
-   [`Kill] sends SIGKILL immediately — the default, for children that hold no
-   resources of their own to release. [`Terminate_then_kill grace] sends
-   SIGTERM and, only if the child is still running [grace] seconds later,
-   follows up with SIGKILL. day10 uses the latter: SIGTERM lets it tear down
-   its own runc container, overlay mount and temp directory (its signal handler)
-   before exiting, which is what a plain SIGKILL prevented. *)
+   [`Kill] kills it at once (SIGKILL, or TerminateProcess on Windows): the
+   default, for children that hold no resources of their own to release.
+   [`Interrupt_then_kill grace] interrupts it, and kills it only if it is
+   still running [grace] seconds later.  day10 uses the latter: the interrupt
+   lets it tear down its own container, overlay mount and temp directory
+   before exiting, which a kill prevents.
+
+   The interrupt is the same on every platform as far as the child can tell:
+   SIGINT.  On Unix it is sent as such.  On Windows it is Ctrl-C on the
+   child's console, sent by a helper process (see console_interrupt.c), which
+   the C runtime delivers as SIGINT; where that cannot be done the child is
+   killed instead. *)
+external console_interrupt_helper : int -> int -> int = "ocluster_console_interrupt_helper"
+
+let interrupt (proc : #Lwt_process.process_out) =
+  if Sys.win32 then
+    Lwt.catch
+      (fun () ->
+         Lwt_process.exec ("", [| Sys.executable_name; "console-interrupt"; string_of_int proc#pid; string_of_int (Unix.getpid ()) |])
+         >|= function
+         | Unix.WEXITED 0 -> true
+         | _ -> false)
+      (fun ex ->
+         Log.warn (fun f -> f "console-interrupt helper failed: %a" Fmt.exn ex);
+         Lwt.return false)
+  else (proc#kill Sys.sigint; Lwt.return true)
+
 (* [`Stdout], the default, sends the child's stderr into the job log with its
    stdout, through one pipe given to the child as both.  The old default,
    [`FD_copy Unix.stdout], only did that on Unix, and by accident: Lwt applies
@@ -49,14 +70,19 @@ let exec ~label ~log ~switch ?env ?(stdin="") ?(stderr=`Stdout) ?(is_success=((=
         Log.info (fun f -> f "Cancelling %s job…" label);
         match on_cancel with
         | `Kill -> proc#terminate
-        | `Terminate_then_kill grace ->
-          proc#kill Sys.sigterm;
+        | `Interrupt_then_kill grace ->
           Lwt.async (fun () ->
-              Lwt_unix.sleep grace >|= fun () ->
-              if Lwt.state proc#status = Lwt.Sleep then (
-                Log.info (fun f ->
-                    f "%s still running %.0fs after SIGTERM; sending SIGKILL" label grace);
-                proc#terminate))
+              interrupt proc >>= function
+              | false ->
+                Log.info (fun f -> f "Cannot interrupt %s; killing it" label);
+                proc#terminate;
+                Lwt.return_unit
+              | true ->
+                Lwt_unix.sleep grace >|= fun () ->
+                if Lwt.state proc#status = Lwt.Sleep then (
+                  Log.info (fun f ->
+                      f "%s still running %.0fs after the interrupt; killing it" label grace);
+                  proc#terminate))
       );
       Lwt.return_unit
     )

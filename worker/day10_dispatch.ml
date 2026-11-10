@@ -168,11 +168,11 @@ let run ~cache_dir ~state_dir ~switch ~log ~src custom =
            markers, so the client parses the region tolerantly. *)
         let markers = String.equal verb "revdeps" in
         if markers then Log_data.write log "@@@OUTPUT\n";
-        (* On cancel, send SIGTERM so day10 can tear down its runc container,
-           overlay mount and temp dir; SIGKILL only if it hasn't exited after
+        (* On cancel, interrupt day10 so it can tear down its container,
+           overlay mount and temp dir; kill it only if it hasn't exited after
            the grace period. *)
         Process.check_call ~label:"day10" ~switch ~log
-          ~on_cancel:(`Terminate_then_kill 60.) cmd
+          ~on_cancel:(`Interrupt_then_kill 60.) cmd
         >|= function
         | Ok () ->
           if markers then Log_data.write log "\n@@@OUTPUT\n";

@@ -13,6 +13,9 @@
 (library
  (name cluster_worker)
  (public_name ocluster-worker)
+ (foreign_stubs
+  (language c)
+  (names console_interrupt))
  (libraries
    capnp-rpc-lwt
    cohttp-lwt-unix

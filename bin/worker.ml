@@ -310,6 +310,8 @@ let () =
   | hd :: "install" :: argv ->
     exit (Cmd.eval ~argv:(Array.of_list (hd :: argv)) (cmd ~install:true))
   | _ :: "remove" :: name :: args -> remove name args
+  | [ _; "console-interrupt"; pid; worker ] ->
+    exit (Cluster_worker.Process.console_interrupt_helper (int_of_string pid) (int_of_string worker))
   | _ :: name :: args when Astring.String.is_prefix ~affix:"remove=" name -> remove name args
   | _ ->
     exit (Cmd.eval (cmd ~install:false))
