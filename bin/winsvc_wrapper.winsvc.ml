@@ -25,7 +25,19 @@ let run name state_dir ?style_renderer (main:?formatter:Format.formatter -> unit
   in
   try
     ensure_dir state_dir;
-    let formatter = Fmt_tty.setup ?style_renderer (open_out_bin name) in
+    let log = open_out_bin name in
+    (* A service has no console, so the process's standard handles are not
+       valid, and every child inherits them: Process.exec gives a child a pipe
+       for stdout but copies the worker's own stdout as its stderr, and day10
+       passes that on again to ctr and hcn-namespace. Under the service on
+       ltsc2025-day10 day10 silently went away before its first container
+       while the same binary run with stdio redirected to a file worked. Point
+       both at the worker's log: the children get real handles, and what they
+       write to stderr is kept next to the worker's own messages. *)
+    let fd = Unix.descr_of_out_channel log in
+    Unix.dup2 fd Unix.stdout;
+    Unix.dup2 fd Unix.stderr;
+    let formatter = Fmt_tty.setup ?style_renderer log in
     Svc.run (main ~formatter)
   with Failure _ ->
     begin try Sys.remove name with Sys_error _ -> () end;
