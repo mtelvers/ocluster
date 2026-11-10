@@ -22,10 +22,28 @@ let send_to ch contents =
    follows up with SIGKILL. day10 uses the latter: SIGTERM lets it tear down
    its own runc container, overlay mount and temp directory (its signal handler)
    before exiting, which is what a plain SIGKILL prevented. *)
-let exec ~label ~log ~switch ?env ?(stdin="") ?(stderr=`FD_copy Unix.stdout) ?(is_success=((=) 0)) ?(on_cancel=`Kill) cmd =
+(* [`Stdout], the default, sends the child's stderr into the job log with its
+   stdout, through one pipe given to the child as both.  The old default,
+   [`FD_copy Unix.stdout], only did that on Unix, and by accident: Lwt applies
+   redirections in the forked child in order, so by the time it copies fd 1 to
+   fd 2, fd 1 is already the log pipe.  On Windows the handles are resolved in
+   the parent, so it meant the worker's own stdout, and day10's verdict
+   ([NOTE] success, [ERROR] failure) never reached the job log. *)
+let spawn ?env ~stderr cmd =
+  match stderr with
+  | `Stdout ->
+    let r, w = Lwt_unix.pipe_in ~cloexec:true () in
+    let proc = Lwt_process.open_process_out ?env ~stdout:(`FD_copy w) ~stderr:(`FD_copy w) cmd in
+    Unix.close w;
+    (proc :> Lwt_process.process_out), Lwt_io.of_fd ~mode:Lwt_io.input r
+  | #Lwt_process.redirection as stderr ->
+    let proc = Lwt_process.open_process ?env ~stderr cmd in
+    (proc :> Lwt_process.process_out), proc#stdout
+
+let exec ~label ~log ~switch ?env ?(stdin="") ?(stderr=`Stdout) ?(is_success=((=) 0)) ?(on_cancel=`Kill) cmd =
   Log.info (fun f -> f "Exec(%s): %a" label Fmt.(list ~sep:sp (quote string)) cmd);
   let cmd = "", Array.of_list cmd in
-  let proc = Lwt_process.open_process ?env ~stderr cmd in
+  let proc, output = spawn ?env ~stderr cmd in
   Lwt_switch.add_hook_or_exec (Some switch) (fun () ->
       if Lwt.state proc#status = Lwt.Sleep then (
         Log.info (fun f -> f "Cancelling %s job…" label);
@@ -43,7 +61,7 @@ let exec ~label ~log ~switch ?env ?(stdin="") ?(stderr=`FD_copy Unix.stdout) ?(i
       Lwt.return_unit
     )
   >>= fun () ->
-  let copy_thread = Log_data.copy_from_stream log proc#stdout in
+  let copy_thread = Log_data.copy_from_stream log output >>= fun () -> Lwt_io.close output in
   send_to proc#stdin stdin >>= fun stdin_result ->
   copy_thread >>= fun () -> (* Ensure all data has been copied before returning *)
   proc#status >|= function
