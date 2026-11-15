@@ -94,7 +94,10 @@ let log_summary log d ~mirror ~cache_dir =
        \  cache-dir        : %s\n\
        \  ocaml-version    : %s\n\
        \  package          : %s\n\
+       \  arch             : %s\n\
+       \  os               : %s\n\
        \  os-distribution  : %s\n\
+       \  os-family        : %s\n\
        \  os-version       : %s\n\
        \  with-test        : %b\n\
        \  lower-bound      : %b\n\
@@ -106,7 +109,10 @@ let log_summary log d ~mirror ~cache_dir =
        mirror cache_dir
        (pp_or_default (R.ocaml_version_get d))
        (pp_or_default (R.package_get d))
+       (pp_or_default (R.arch_get d))
+       (pp_or_default (R.os_get d))
        (pp_or_default (R.os_distribution_get d))
+       (pp_or_default (R.os_family_get d))
        (pp_or_default (R.os_version_get d))
        (R.with_test_get d)
        (R.lower_bound_get d)
