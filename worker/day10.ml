@@ -12,21 +12,24 @@ type t = {
   cond : unit Lwt_condition.t;          (* fires when a prune pass finishes / space is fine *)
 }
 
-(* [day10 prune --base --days N]: delete the base images built more than N days
-   ago, and the layers that installed system packages on them, for the next
-   build on each platform to make a fresh base from the current package index.
-   A build must not start while it runs, since it would be reading a base that
-   is being removed; [run] holds new builds back until it is done. *)
+(* [day10 prune --base --temp --days N]: delete the base images built more than N
+   days ago, and the layers that installed system packages on them, for the next
+   build on each platform to make a fresh base from the current package index;
+   and reclaim any temp-* directories a killed build left behind (unmounting
+   whatever they still hold). Both must run with nothing building: --base reads a
+   base that is being removed, and --temp cannot tell a live temp dir from an
+   abandoned one. [run] holds new builds back until it is done, and the schedule
+   only starts it when the worker is idle. *)
 let rebase t ~days =
-  let argv = [| "day10"; "prune"; "--cache-dir"; t.cache_dir; "--base"; "--days"; string_of_int days |] in
+  let argv = [| "day10"; "prune"; "--cache-dir"; t.cache_dir; "--base"; "--temp"; "--days"; string_of_int days |] in
   Log.info (fun f -> f "Replacing day10 base images: %s" (String.concat " " (Array.to_list argv)));
   t.rebasing <- true;
   Lwt.finalize
     (fun () ->
        Lwt_process.exec ("", argv) >|= function
        | Unix.WEXITED 0 -> ()
-       | Unix.WEXITED n -> Log.warn (fun f -> f "day10 prune --base exited with code %d" n)
-       | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Log.warn (fun f -> f "day10 prune --base was killed by a signal"))
+       | Unix.WEXITED n -> Log.warn (fun f -> f "day10 prune --base --temp exited with code %d" n)
+       | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Log.warn (fun f -> f "day10 prune --base --temp was killed by a signal"))
     (fun () ->
        t.rebasing <- false;
        Lwt_condition.broadcast t.cond ();
